@@ -2,123 +2,118 @@
 
 ## WIRE FORMAT
 
-A Vanilla Object Format chunk is a stream of Varint control values, each sometimes followed by data as specified by the value itself.  Since some control values are constant and fit in a single byte, they may be identified without even decoding.
+A Vanilla Object Format chunk is a stream of control values, each sometimes followed by data as specified by the value itself.
 
-Optionally, writers may prefix their output with `0x21566F46` ("!VoF") as a format magic number.
+Optionally, writers may prefix their output with `0x566F461A` ("VoF^Z") as a format magic number.
 
 The suggested MIME type for binary encoded transfers is `application/x-vanilla-object` while JSON remains `application/json`.
 
 The suggested file name extension is `.vof`.
 
-### Prefix Varint
+### Control Values
 
-Uses the same space as the better-known LEB128 (Protobuf, Thrift Compact), less for full 64 bits, while being nearly an order of magnitude faster to process.  The range of the first byte reveals the size.  This can be seen as accumulating LEB128 continuation bits into the first byte of a little-endian sequence.  Optimized for a maximum of 64 significant bits.  Illustrated from the decoding point of view:
+Similar to the Prefix Varint encoding (itself an order of magnitude simpler than LEB128 at run-time), we prioritize the compactness of small integers at the slight expense of larger ones.  Extra bytes for the `Int` types are in Little Endian order, thus any bits from the initial byte are the least significant.  Illustrated from the decoding point of view:
 
-| LSB        | Bytes | Precision | Condition | Operation                           |
-| ---------- | ----- | --------- | --------- | ----------------------------------- |
-| `0_______` | 1     | 7-bit     | `< 128`   | `c`                                 |
-| `10______` | 2     | 14-bit    | `< 192`   | `(next_bytes_le(1) << 6) + c - 128` |
-| `110_____` | 3     | 21-bit    | `< 224`   | `(next_bytes_le(2) << 5) + c - 192` |
-| `1110____` | 4     | 28-bit    | `< 240`   | `(next_bytes_le(3) << 4) + c - 224` |
-| `11110___` | 5     | 35-bit    | `< 248`   | `(next_bytes_le(4) << 3) + c - 240` |
-| `111110__` | 6     | 42-bit    | `< 252`   | `(next_bytes_le(5) << 2) + c - 248` |
-| `1111110_` | 7     | 49-bit    | `< 254`   | `(next_bytes_le(6) << 1) + c - 252` |
-| `11111110` | 8     | 56-bit    | `== 254`  | `next_bytes_le(7)`                  |
-| `11111111` | 9     | 64-bit    |           | `next_bytes_le(8)`                  |
+| Character  | Bytes   | Type        | Condition | Operation                                                         |
+| ---------- | ------- | ----------- | --------- | ----------------------------------------------------------------- |
+| `0_______` | 1       | Int 7-bit   | `< 128`   | `c`                                                               |
+| `10______` | 2       | Int 14-bit  | `< 192`   | `(next_bytes_le(1) << 6) + c - 128`                               |
+| `110_____` | 3       | Int 21-bit  | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                               |
+| `11100___` | 4       | Int 27-bit  | `< 232`   | `(next_bytes_le(3) << 4) + c - 224`                               |
+| `111010__` | 1       | List        | `< 236`   | Exactly `c - 232` items (0..3)                                    |
+| `111011__` | 1       | Struct      | `< 240`   | Exactly `c - 236` groups (0..3)                                   |
+| `1111000_` | 5       | Int 33-bit  | `< 242`   | `(next_bytes_le(4) << 1) + c - 240`                               |
+|            | 1       | Close       | `== 242`  | Close nearest `List` or `Struct`                                  |
+|            | 1       | List Open   | `== 243`  | Items until `Close`                                               |
+|            | 1       | Struct Open | `== 244`  | Groups until `Close`                                              |
+|            | 1+V+N   | Data        | `== 245`  | Next `Int` V is size N in bytes                                   |
+|            | 1       | Data        | `== 246`  | Data (empty)                                                      |
+|            | 3       | Data        | `== 247`  | Data (2 bytes)                                                    |
+|            | 5       | Data        | `== 248`  | Data (4 bytes)                                                    |
+|            | 9       | Data        | `== 249`  | Data (8 bytes)                                                    |
+|            | 1       | Null        | `== 250`  |                                                                   |
+|            | 6       | Int 40-bit  | `== 251`  | `next_bytes_le(5)`                                                |
+|            | 7       | Int 48-bit  | `== 252`  | `next_bytes_le(6)`                                                |
+|            | 8       | Int 56-bit  | `== 253`  | `next_bytes_le(7)`                                                |
+|            | 9       | Int 64-bit  | `== 254`  | `next_bytes_le(8)`                                                |
+|            | 1+V1+V2 | Tag         |           | Next V1 is tag qualifying V2<br/>0..63 user-defined, 64+ reserved |
 
-### Zigzag signed
+Lists of 0, 1, 2, 3 items, structs of 0, 1, 2, 3 groups and Data with 0, 2, 4, 8 bytes should be encoded in their short form.  Integers should be encoded in the smallest form possible.
 
-When an integer is considered signed, its least significant bit before encoding into the above indicates the sign.  Encoding from typical 2's complement is `(i >> (int_size - 1)) XOR (i << 1)` and decoding is `(value >> 1) XOR -(value AND 1)`.  This is identical to Protbuf's.
+### Implicit List
 
-### Constants
+A chunk is considered an implicit list without the initial `List Open` nor the final `Close` bytes.  Therefore, a 7-bit ASCII file may be decoded as a valid list of 7-bit integers.
 
-These control bytes stand alone.  While they are technically constructed as a Prefix Varint, they don't need to be handled as such.  They are provided in their encoded, wire values here.
+### Int Optionally Signed
 
-| Byte                        | Description                                  |
-| --------------------------- | -------------------------------------------- |
-| `0x01,05,09,0D,11,15,19,1D` | **List** of 0..7 values follows (`c >> 2`)   |
-| `0x21`                      | **Null**                                     |
-| `0x25`                      | **List** of values follows until **End**     |
-| `0x29`                      | **End** of list                              |
-| `0x2D,31`                   | **Tag** qualifies next value, reserved       |
-| `0x35,39`                   | **Tag** qualifies next value, _user-defined_ |
+When an integer is considered signed, its least significant bit before encoding into the above indicates the sign.  Encoding from typical 2's complement is `(i >> (int_size - 1)) XOR (i << 1)` and decoding is `(value >> 1) XOR -(value AND 1)`.  This is identical to Protbuf's "ZigZag" encoding.
 
-### Variables
+### Struct
 
-Any other byte is the first of a Prefix Varint sequence.  The 2 least significant bits of the decoded integer are used as follows:
+Similar to Protobuf's messages, their fields are numbered from 0.  Structs are groups of values, each structured as a field identification byte followed by as many values as the byte specifies.  Fields must thus be encoded in ascending numeric order.
 
-| LSB  | Shift  | Remainder                                                             |
-| ---- | ------ | --------------------------------------------------------------------- |
-| `_0` | 1 bit  | **Int** (use Data when 63 bits isn't enough)                          |
-| `01` | 2 bits | **Data** byte count of following data `+ 15` (i.e. 31 means 16 bytes) |
-| `11` | 2 bits | **Bitmap** bitmap of up to 62 IDs followed by one value per set bit   |
+| Byte       | Description                                           |
+| ---------- | ----------------------------------------------------- |
+| `0_______` | Delta (1..128) from previous field ID, `count = 1`    |
+| `1_______` | Map of the next 7 fields, `count` is number of 1 bits |
+
+Field numbers and names should remain reserved forever when they are deprecated to avoid version conflicts.
 
 ## DATA TYPES
 
 These higher-level types are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.
 
-| Name                   | Wire Encoding                                                               |
-| ---------------------- | --------------------------------------------------------------------------- |
-| `undefined`            | In a `struct`, the absence of a field                                       |
-| `null`                 | Null                                                                        |
-| `list`/`…s`            | List(0..7) + 0..7 vals / List + vals + End                                  |
-| `map`                  | `list` of alternating keys and values, in ascending key order               |
-| `string`/`str`         | Data + N bytes as UTF-8                                                     |
-| `bytes`/`data`         | Data + N bytes                                                              |
-| `bool`                 | Int values `0` and `1` (constant control bytes `0x01` and `0x05`)           |
-| `uint`                 | Int / `bytes` little-endian for 64,128 bits                                 |
-| `int`                  | `uint` Zigzag signed / `bytes` little-endian 2's complement for 64,128 bits |
-| `enum`                 | `uint`                                                                      |
-| `variant`              | `list[uint,args…]` / `uint`                                                 |
-| `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                                 |
-| `code`                 | `uint` interpreted as base-36 up to 12 chars (i.e. "USD" is `0x9BDD`)       |
-| `binary`/`float`/`fp`  | `bytes` as IEEE 754 float binary 16,32,64,128,256 precisions                |
-| `decimal`/`dec`        | `uint` (Zigzag signed digits `<< 4`) + 0..15 decimal places                 |
-| `ratio`                | Bitmap(0,1) + `int` numerator + `uint` denominator                          |
-| `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                                    |
-| `struct`/`obj`         | Bitmap + vals / `map` with `uint` field ID keys / `uint` (see References)   |
-| `ratio`                | `list[int,uint]`                                                            |
-| `mask`                 | `list` of a mix of `uint` and `list` (recursive)                            |
-| `datetime`/`date`/`dt` | `list` of 1..7 values (see Datetime)                                        |
-| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_227`                            |
-| `language`/`lang`      | `code` IETF BCP-47                                                          |
-| `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                                   |
-| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (no country prefix)                             |
-| `currency`/`curr`      | `code` ISO 4217 alpha-3                                                     |
-| `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure                          |
-| `text`                 | `map` of `lang,string` pairs / `string`                                     |
-| `amount`/`amt`         | `list[decimal,currency]` / `decimal`                                        |
-| `quantity`/`qty`       | `list[decimal,unit]` / `decimal`                                            |
-| `ip`                   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                                   |
-| `subnet`/`cidr`/`net`  | `list[ip,uint]` CIDR notation: IP with netmask size in bits                 |
+| Name                   | Wire Encoding                                                                 |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `undefined`            | In a `struct`, the absence of a field                                         |
+| `null`                 | Null                                                                          |
+| `list`/`…s`            | List(0..3) + 0..3 vals / List Open + vals + Close                             |
+| `map`                  | `list` of alternating keys and values, in ascending key order for determinism |
+| `string`/`str`         | Data(0,2,4,8) + 0,2,4,8 bytes / Data + V + N bytes as UTF-8                   |
+| `bytes`/`data`         | Same as `string` but without implied UTF-8                                    |
+| `bool`                 | Int values `0` and `1`                                                        |
+| `uint`                 | Int                                                                           |
+| `int`                  | Int signed ("ZigZag")                                                         |
+| `enum`                 | `uint`                                                                        |
+| `variant`              | `list[uint,args…]` / `uint`                                                   |
+| `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                                   |
+| `code`                 | `uint` interpreted as base-36 up to 12 chars (i.e. "USD" is `0x9BDD`)         |
+| `binary`/`float`/`fp`  | `bytes` as IEEE 754 float binary 16,32,64,128,256 precisions                  |
+| `decimal`/`dec`        | `uint` (signed digits `<< 4`) + 0..15 decimal places                          |
+| `ratio`                | `list[int,uint]`                                                              |
+| `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                                      |
+| `struct`/`obj`         | Struct(0..3) + groups / Struct + groups + Close / `uint` (see References)     |
+| `mask`                 | `list` of a mix of `uint` and `list` (recursive)                              |
+| `datetime`/`date`/`dt` | Struct of up to 7 fields (see Datetime)                                       |
+| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_227`                              |
+| `language`/`lang`      | `code` IETF BCP-47                                                            |
+| `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                                     |
+| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (no country prefix)                               |
+| `currency`/`curr`      | `code` ISO 4217 alpha-3                                                       |
+| `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure                            |
+| `text`                 | `map` of `lang,string` pairs / `string`                                       |
+| `amount`/`amt`         | `list[decimal,currency]` / `decimal`                                          |
+| `quantity`/`qty`       | `list[decimal,unit]` / `decimal`                                              |
+| `ip`                   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                                     |
+| `subnet`/`cidr`/`net`  | `list[ip,uint]` CIDR notation: IP with netmask size in bits                   |
 
 ### Datetime
 
-Calendar concept, thus subject to a time zone, represented as a List to facilitate truncating at any precision (i.e. just YMD). Items are, in order:
+Calendar concept, thus subject to a time zone.  Intended to be specified in any precision such as simple dates or dates with times.  Zero values may be omitted.  Non-zero UTC offsets are important even with mere dates.  Fields:
 
-* Int year `- 2023`
+* **0: year** `int` offset from 2023
 
-* Uint month (1..12)
+* **1: month** `uint` 1..12
 
-* Uint day (1..31)
+* **2: day** `uint` 1..31
 
-* Uint hours (0..23)
+* **3: hours** `uint` 0..23
 
-* Uint minutes (0..59)
+* **4: minutes** `uint` 0..59
 
-* Uint seconds (0..59)
+* **5: seconds** `uint` 0..59
 
-* Int UTC offset in minutes (-720 .. +840)
-
-### Struct
-
-Similar to Protobuf's messages, their fields are named numbered from 0.  There are two encodings, in order of preference:
-
-* `Bitmap` when `max(id) < 62 && ceil((2 + max(id)) / 7) < field_count`
-
-* `map` of field IDs and their values
-
-Field IDs and names should remain reserved forever when they are deprecated to avoid version conflicts.
+* **6: offset** `int` -720..+840 minutes from UTC
 
 ### Mask
 
