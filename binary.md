@@ -2,7 +2,7 @@
 
 ## WIRE FORMAT
 
-A Vanilla Object Format chunk is a stream of control values, each sometimes followed by data as specified by the value itself.
+A Vanilla Object Format chunk is a stream of values, each sometimes followed by data as specified by the value itself.
 
 Optionally, writers may prefix their output with `0x566F461A` ("VoF^Z") as a format magic number.
 
@@ -12,37 +12,31 @@ The suggested file name extension is `.vof`.
 
 ### Control Values
 
-Similar to the Prefix Varint encoding (itself an order of magnitude simpler than LEB128 at run-time), we prioritize the compactness of small integers at the slight expense of larger ones.  Extra bytes for the `Int` types are in Little Endian order, thus any bits from the initial byte are the least significant.  Illustrated from the decoding point of view:
+We compress small integers at the slight expense of larger ones, similarly to Prefix Varint (a variation on LEB128 which eliminates loops and most shifts).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Non-integer types are in the highest values to minimize disruption for integers.  From the decoder point of view:
 
-| Character  | Bytes   | Type        | Condition | Operation                                                         |
-| ---------- | ------- | ----------- | --------- | ----------------------------------------------------------------- |
-| `0_______` | 1       | Int 7-bit   | `< 128`   | `c`                                                               |
-| `10______` | 2       | Int 14-bit  | `< 192`   | `(next_bytes_le(1) << 6) + c - 128`                               |
-| `110_____` | 3       | Int 21-bit  | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                               |
-| `11100___` | 4       | Int 27-bit  | `< 232`   | `(next_bytes_le(3) << 4) + c - 224`                               |
-| `111010__` | 1       | List        | `< 236`   | Exactly `c - 232` items (0..3)                                    |
-| `111011__` | 1       | Struct      | `< 240`   | Exactly `c - 236` groups (0..3)                                   |
-| `1111000_` | 5       | Int 33-bit  | `< 242`   | `(next_bytes_le(4) << 1) + c - 240`                               |
-|            | 1       | Close       | `== 242`  | Close nearest `List` or `Struct`                                  |
-|            | 1       | List Open   | `== 243`  | Items until `Close`                                               |
-|            | 1       | Struct Open | `== 244`  | Groups until `Close`                                              |
-|            | 1+V+N   | Data        | `== 245`  | Next `Int` V is size N in bytes                                   |
-|            | 1       | Data        | `== 246`  | Data (empty)                                                      |
-|            | 3       | Data        | `== 247`  | Data (2 bytes)                                                    |
-|            | 5       | Data        | `== 248`  | Data (4 bytes)                                                    |
-|            | 9       | Data        | `== 249`  | Data (8 bytes)                                                    |
-|            | 1       | Null        | `== 250`  |                                                                   |
-|            | 6       | Int 40-bit  | `== 251`  | `next_bytes_le(5)`                                                |
-|            | 7       | Int 48-bit  | `== 252`  | `next_bytes_le(6)`                                                |
-|            | 8       | Int 56-bit  | `== 253`  | `next_bytes_le(7)`                                                |
-|            | 9       | Int 64-bit  | `== 254`  | `next_bytes_le(8)`                                                |
-|            | 1+V1+V2 | Tag         |           | Next V1 is tag qualifying V2<br/>0..63 user-defined, 64+ reserved |
+| 1st Byte (`c`) | Total Bytes | Type                | Condition | Description / Operation                               |
+| -------------- | ----------- | ------------------- | --------- | ----------------------------------------------------- |
+| `0_______`     | 1           | Int 7-bit           | `< 128`   | `c`                                                   |
+| `10______`     | 2           | Int 14-bit          | `< 192`   | `(next_byte() << 6) + c - 128`                        |
+| `110_____`     | 3           | Int 21-bit          | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                   |
+| `11100___`     | 4           | Int 27-bit          | `< 232`   | `(next_bytes_le(3) << 3) + c - 224`                   |
+| `111010__`     | 1           | List                | `< 236`   | Exactly `c - 232` items (0..3)                        |
+| `111011__`     | 1           | Struct              | `< 240`   | Exactly `c - 236` groups (0..3)                       |
+| `1111000_`     | 5           | Int 33-bit          | `< 242`   | `(next_bytes_le(4) << 1) + c - 240`                   |
+|                | 1+V+N       | Data                | `== 242`  | Next `Int` V is size N in bytes                       |
+|                | 1,3,5,9     | Data                | `< 247`   | Data (0,2,4,8 bytes)                                  |
+|                | 6,7,8,9     | Int 40,48,56,64 bit | `< 251`   | `next_bytes_le(5)`, 6, 7, 8                           |
+|                | 1           | List Open           | `== 251`  | Items until `List Close`                              |
+|                | 1           | List Close          | `== 252`  | Close nearest `List Open`                             |
+|                | 1           | Struct Open         | `== 253`  | Struct groups until `128` (see Struct)                |
+|                | 1           | Null                | `== 254`  |                                                       |
+|                | 1+V1+V2     | Tag                 |           | V1 int qualifies V2, 0..63 user-defined, 64+ reserved |
 
 Lists of 0, 1, 2, 3 items, structs of 0, 1, 2, 3 groups and Data with 0, 2, 4, 8 bytes should be encoded in their short form.  Integers should be encoded in the smallest form possible.
 
 ### Implicit List
 
-A chunk is considered an implicit list without the initial `List Open` nor the final `Close` bytes.  Therefore, a 7-bit ASCII file may be decoded as a valid list of 7-bit integers.
+A chunk is considered an implicit list without the initial `List Open` nor the final `Close` values.  Therefore, a 7-bit ASCII file is a valid list of integers.
 
 ### Int Optionally Signed
 
@@ -50,12 +44,13 @@ When an integer is considered signed, its least significant bit before encoding 
 
 ### Struct
 
-Similar to Protobuf's messages, their fields are numbered from 0.  Structs are groups of values, each structured as a field identification byte followed by as many values as the byte specifies.  Fields must thus be encoded in ascending numeric order.
+Similar to Protobuf's messages, their fields are numbered from 0.  Structs are groups of values, each structured as a field identification byte followed by as many values as the byte specifies.  Fields must thus be encoded in ascending numeric order.  The initial implied previous field ID is -1, so the Delta of an initial field 0 is 0.
 
-| Byte       | Description                                           |
-| ---------- | ----------------------------------------------------- |
-| `0_______` | Delta (1..128) from previous field ID, `count = 1`    |
-| `1_______` | Map of the next 7 fields, `count` is number of 1 bits |
+| Byte (`c`) | Condition | Description                                                 |
+| ---------- | --------- | ----------------------------------------------------------- |
+| `0_______` | `< 128`   | Delta (1..128) from previous field ID, 1 value follows      |
+| `10000000` | `== 128`  | Close nearest `Struct Open`                                 |
+| `1_______` |           | `c - 128` maps the next 7 fields, 1 value per 1 bit follows |
 
 Field numbers and names should remain reserved forever when they are deprecated to avoid version conflicts.
 
@@ -79,7 +74,7 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                                   |
 | `code`                 | `uint` interpreted as base-36 up to 12 chars (i.e. "USD" is `0x9BDD`)         |
 | `binary`/`float`/`fp`  | `bytes` as IEEE 754 float binary 16,32,64,128,256 precisions                  |
-| `decimal`/`dec`        | `uint` (signed digits `<< 4`) + 0..15 decimal places                          |
+| `decimal`/`dec`        | `uint` as signed digits `<< 4` and 0..15 decimal places                       |
 | `ratio`                | `list[int,uint]`                                                              |
 | `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                                      |
 | `struct`/`obj`         | Struct(0..3) + groups / Struct + groups + Close / `uint` (see References)     |
