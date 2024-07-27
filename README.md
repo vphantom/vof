@@ -6,7 +6,7 @@
 Really, yet another serialization format?  Yes, but one of the simplest!  This fills a niche use case of ours somewhere between JSON, CBOR and Protocol Buffers with the following goals:
 
 * Easy to implement in a new language (weekend project)
-* Low CPU/memory requirements both ways
+* Low CPU/memory requirements to encode and especially decode
 * Smaller output size (even vs JSON+gzip)
 * Streamable (unlike Protobuf)
 * Compact struct type (unlike CBOR)
@@ -15,7 +15,7 @@ Really, yet another serialization format?  Yes, but one of the simplest!  This f
 * Application-facing references (de-duplication on the wire and in memory)
 * Schema-based (writers and readers agree on types out-of-band)
 * Still enough type information for inspection of unknown data
-* Explicit JSON interoperability (like Protobuf)
+* Explicit binary-JSON interoperability (like Protobuf)
 
 Thus we have a schema-based format based on very simple types on the wire.  Unlike Protobuf, Thrift, Avro, etc. we do not define an interface description language (IDL) and instead rely on implicit typing, much like JSON and CBOR APIs are usually documented and implemented in the wild.
 
