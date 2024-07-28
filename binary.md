@@ -12,21 +12,21 @@ The suggested file name extension is `.vof`.
 
 ### Control Values
 
-Small integers are compressed at the slight expense of larger ones similarly to Prefix Varint (a variation on LEB128 which eliminates loops, most shifts and represents 64 bits in 9 bytes instead of 10).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Illustrated here from the decoder point of view, we see that very little work is needed:
+Small integers are compressed at the slight expense of larger ones similarly to Prefix Varint (a variation on LEB128 which eliminates loops, most shifts and represents 64 bits in 9 bytes instead of 10).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Illustrated here from the decoder point of view, we see that very little work is involved:
 
-| Byte (`c`) | Total Bytes | Type                | Condition | Description / Operation                                     |
-| ---------- | ----------- | ------------------- | --------- | ----------------------------------------------------------- |
-| `0_______` | 1           | Int 7-bit           | `< 128`   | `c`                                                         |
-| `10______` | 2           | Int 14-bit          | `< 192`   | `(next_byte() << 6) + c - 128`                              |
-| `110_____` | 3           | Int 21-bit          | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                         |
-| `11100___` | 4           | Int 27-bit          | `< 232`   | `(next_bytes_le(3) << 3) + c - 224`                         |
-|            | 5,6,7,8,9   | Int 32,40,48,56,64  | `< 237`   | `next_bytes_le(4)`, 5, 6, 7, 8                              |
-|            | 1           | List                | `< 243`   | Open (items until End), End, exactly 0,1,2,3 items          |
-|            | 1           | Struct              | `< 249`   | Open (groups until 128), empty, `01`, `001`, `011`, 1 group |
-|            | _varies_    | Data                | `< 251`   | Size + bytes, empty                                         |
-|            | 2,4,8       | Float               | `< 254`   | IEEE 754 floating point binary 16,32,64 bit precisions      |
-|            | 1           | Null                | `== 254`  |                                                             |
-|            | 1+V1+V2     | Tag                 |           | V1 int qualifies V2, 0..63 user-defined, 64+ reserved       |
+| Byte (`c`) | Total Bytes | Type               | Condition | Description / Operation                                     |
+| ---------- | ----------- | ------------------ | --------- | ----------------------------------------------------------- |
+| `0_______` | 1           | Int 7-bit          | `< 128`   | `c`                                                         |
+| `10______` | 2           | Int 14-bit         | `< 192`   | `(next_byte() << 6) + c - 128`                              |
+| `110_____` | 3           | Int 21-bit         | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                         |
+| `11100___` | 4           | Int 27-bit         | `< 232`   | `(next_bytes_le(3) << 3) + c - 224`                         |
+|            | 5,6,7,8,9   | Int 32,40,48,56,64 | `< 237`   | `next_bytes_le(4)`, 5, 6, 7, 8                              |
+|            | 1           | List               | `< 243`   | Open (items until End), End, exactly 0,1,2,3 items          |
+|            | 1           | Struct             | `< 249`   | Open (groups until 128), empty, `01`, `001`, `011`, 1 group |
+|            | _varies_    | Data               | `< 251`   | Size + bytes, empty                                         |
+|            | 2,4,8       | Float              | `< 254`   | IEEE 754 floating point binary 16,32,64 bit precisions      |
+|            | 1           | Null               | `== 254`  |                                                             |
+|            | 1+V1+V2     | Tag                |           | V1 int qualifies V2, 0..63 user-defined, 64+ reserved       |
 
 ### Canonical Encoding
 
@@ -45,6 +45,8 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 * Structs with a single group must be encoded with the shortcut (248), multiple groups with the general case (243) which is terminated by 128 (see Struct below).
 
 * Empty Data must be encoded with the shortcut (250).  Other sizes use the general case (249) followed by an Int to specify the length, then the data bytes.
+
+* Float 16, Float 32 and Float 64 are considered distinct types and thus canonical encoding does not require contracting larger precision floats into the smallest lossless precision.  This was decided to keep implementation complexity lower.
 
 ### Implicit List
 
