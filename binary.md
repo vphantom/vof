@@ -23,7 +23,8 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 |            | 5,6,7,8,9   | Int 32,40,48,56,64  | `< 237`   | `next_bytes_le(4)`, 5, 6, 7, 8                              |
 |            | 1           | List                | `< 243`   | Open (items until End), End, exactly 0,1,2,3 items          |
 |            | 1           | Struct              | `< 249`   | Open (groups until 128), empty, `01`, `001`, `011`, 1 group |
-|            | _varies_    | Data                | `< 254`   | Size + bytes, 0, 2, 4, 8 bytes                              |
+|            | _varies_    | Data                | `< 251`   | Size + bytes, empty                                         |
+|            | 2,4,8       | Float               | `< 254`   | IEEE 754 floating point binary 16,32,64 bit precisions      |
 |            | 1           | Null                | `== 254`  |                                                             |
 |            | 1+V1+V2     | Tag                 |           | V1 int qualifies V2, 0..63 user-defined, 64+ reserved       |
 
@@ -43,7 +44,7 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 
 * Structs with a single group must be encoded with the shortcut (248), multiple groups with the general case (243) which is terminated by 128 (see Struct below).
 
-* Data with 0, 2, 4 or 8 bytes must be introduced with the shortcuts (250, 251, 252, 253).  Other sizes use the general case (249) followed by an Int control value to specify the length, then the data.
+* Empty Data must be encoded with the shortcut (250).  Other sizes use the general case (249) followed by an Int to specify the length, then the data bytes.
 
 ### Implicit List
 
@@ -81,11 +82,13 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | `bool`                 | Int values `0` and `1`                                                |
 | `uint`                 | Int                                                                   |
 | `int`                  | Int signed ("ZigZag")                                                 |
+| `float16`/`f16`        | Float 16                                                              |
+| `float32`/`f32`        | Float 32                                                              |
+| `float64`/`f64`        | Float 64                                                              |
 | `enum`                 | `uint`                                                                |
 | `variant`              | `list[uint,args…]` / `uint`                                           |
 | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                           |
 | `code`                 | `uint` interpreted as base-36 up to 12 chars (i.e. "USD" is `0x9BDD`) |
-| `binary`/`float`/`fp`  | `bytes` as IEEE 754 float binary 16,32,64,128,256 precisions          |
 | `decimal`/`dec`        | `uint` as signed digits `<< 4` and 0..15 decimal places               |
 | `ratio`                | `list[int,uint]`                                                      |
 | `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                              |
