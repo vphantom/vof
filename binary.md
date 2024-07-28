@@ -74,57 +74,58 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 
 | Name                   | Wire Encoding                                                         |
 | ---------------------- | --------------------------------------------------------------------- |
-| `undefined`            | In a `struct`, the absence of a field                                 |
 | `null`                 | Null                                                                  |
+| `bool`                 | Int values `0` and `1`                                                |
 | `list`/`…s`            | List(0..3) + 0..3 vals / List Open + vals + Close                     |
 | `map`                  | `list` of alternating keys and values                                 |
+| `enum`                 | Int                                                                   |
+| `variant`              | `list[enum,args…]` / `enum`                                           |
 | `struct`/`obj`         | List(1..3) + values / Struct(0..3) + groups / Struct + groups + Close |
-| `string`/`str`         | Data(0,2,4,8) + 0,2,4,8 bytes / Data + V + N bytes as UTF-8           |
-| `bytes`/`data`         | Same as `string` but without implied UTF-8                            |
-| `bool`                 | Int values `0` and `1`                                                |
+| `string`/`str`         | Data (empty) / Data + size + bytes as UTF-8                           |
+| `bytes`/`data`         | Same as `string` but without implied UTF-8                            |
+| `decimal`/`dec`        | Int as signed ("ZigZag") digits `<< 4` and 0..15 decimal places       |
 | `uint`                 | Int                                                                   |
 | `int`                  | Int signed ("ZigZag")                                                 |
+| `ratio`                | `list[int,uint]`                                                      |
+| `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                              |
 | `float16`/`f16`        | Float 16                                                              |
 | `float32`/`f32`        | Float 32                                                              |
 | `float64`/`f64`        | Float 64                                                              |
-| `enum`                 | `uint`                                                                |
-| `variant`              | `list[uint,args…]` / `uint`                                           |
-| `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                           |
-| `code`                 | `uint` interpreted as base-36 up to 12 chars (i.e. "USD" is `0x9BDD`) |
-| `decimal`/`dec`        | `uint` as signed digits `<< 4` and 0..15 decimal places               |
-| `ratio`                | `list[int,uint]`                                                      |
-| `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                              |
 | `mask`                 | `list` of a mix of `uint` and `list` (recursive)                      |
 | `datetime`/`date`/`dt` | Struct of up to 7 fields (see Datetime)                               |
 | `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_227`                      |
+| `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                           |
+| `code`                 | `uint` interpreted as base-36 up to 12 chars (i.e. "USD" is `0x9BDD`) |
 | `language`/`lang`      | `code` IETF BCP-47                                                    |
 | `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                             |
-| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (no country prefix)                       |
+| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (without country prefix)                  |
 | `currency`/`curr`      | `code` ISO 4217 alpha-3                                               |
 | `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure                    |
 | `text`                 | `map` of `lang,string` pairs / `string`                               |
-| `amount`/`amt`         | `list[decimal,currency]` / `decimal`                                  |
+| `amount`/`price`/`amt` | `list[decimal,currency]` / `decimal`                                  |
 | `quantity`/`qty`       | `list[decimal,unit]` / `decimal`                                      |
 | `ip`                   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                             |
 | `subnet`/`cidr`/`net`  | `list[ip,uint]` CIDR notation: IP with netmask size in bits           |
 
 ### Datetime
 
-Calendar concept, thus subject to a time zone.  Intended to be specified in any precision such as simple dates or dates with times.  Zero values may be omitted.  Non-zero UTC offsets are important even with mere dates.  Fields:
+Calendar concept, thus subject to a time zone.  Intended to be specified in any precision such as simple dates or dates with times.  Zero values should be omitted.  Non-zero UTC offsets are important even with dates in order to calculate correct differences.  Fields:
 
 * **0: year** `int` offset from 2023
 
-* **1: month** `uint` 1..12
+* **1: month** `int` 1..12
 
-* **2: day** `uint` 1..31
+* **2: day** `int` 1..31
 
-* **3: hours** `uint` 0..23
+* **3: hours** `int` 0..23
 
-* **4: minutes** `uint` 0..59
+* **4: minutes** `int` 0..59
 
-* **5: seconds** `uint` 0..59
+* **5: seconds** `int` 0..59
 
 * **6: offset** `int` -720..+840 minutes from UTC
+
+With its signed integers, this may also be used to represent time spans.  In that use case, `offset` must not be specified.  For example, "yesterday next year" could be represented as `{year:1,day:-1}`.
 
 ### Mask
 

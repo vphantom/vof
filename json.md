@@ -4,39 +4,56 @@ Regular JSON with some typing and formatting conventions directly interchangeabl
 
 The following high-level types are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.
 
-| Name                   | JSON Encoding                                                                       |
-| ---------------------- | ----------------------------------------------------------------------------------- |
-| `undefined`            | In a `struct`, the absence of a field                                               |
-| `null`                 | Explicit null                                                                       |
-| `list`/`…s`            | Array                                                                               |
-| `map`                  | Object                                                                              |
-| `struct`/`obj`         | Object with field name keys / String                                                |
-| `string`/`str`         | String (necessarily UTF-8)                                                          |
-| `bytes`/`data`         | String Base-64 URL                                                                  |
-| `bool`                 | Boolean                                                                             |
-| `enum`                 | `string` uppercase label                                                            |
-| `variant`              | Array[`string`,args…] / `string`                                                    |
-| `uint`                 | Number if in JS MAX_SAFE_INTEGER, `bytes` little-endian otherwise                   |
-| `int`                  | Number if in JS MIN/MAX_SAFE_INTEGER, or `bytes` little-endian 2's complement       |
-| `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                                         |
-| `code`                 | `string` strictly uppercase alphanumeric ASCII (i.e. "USD")                         |
-| `binary`/`float`/`fp`  | Number for 16,32,64 bit precisions, `bytes` IEEE 754 for 128,256 bit precisions     |
-| `decimal`/`dec`        | String: optional `-`, 1+ digits and optionally a period `.` and 1+ digits           |
-| `ratio`                | String: optional `-`, 1+ digits, `/`, 1+ digits                                     |
-| `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is "0.5")                                          |
-| `mask`                 | `list` of a mix of `string` and `list` (see below)                                  |
-| `datetime`/`date`/`dt` | String: `YYYY-MM-DD hh:mm:ss [+-]hhmm` (time and UTC offset independently optional) |
-| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_227`                                    |
-| `language`/`lang`      | `code` IETF BCP-47                                                                  |
-| `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                                           |
-| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (no country prefix)                                     |
-| `currency`/`curr`      | `code` ISO 4217 alpha-3                                                             |
-| `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure                                  |
-| `text`                 | `map` of `lang,string` pairs / `string` for just one in a clear context             |
-| `amount`/`price`/`amt` | String: `decimal` and optionally a single space and a `currency` (i.e. "1.23 CAD")  |
-| `quantity`/`qty`       | String: `decimal` and optionally a single space and a `unit` (i.e. "1.23 GRM")      |
-| `ip`                   | `string` IPv4 or IPv6 notation                                                      |
-| `subnet`/`cidr`/`net`  | `string` CIDR notation                                                              |
+| Name                   | JSON Encoding                                                            |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `null`                 | Null                                                                     |
+| `bool`                 | Boolean                                                                  |
+| `list`/`…s`            | Array                                                                    |
+| `map`                  | Object                                                                   |
+| `enum`                 | String UPPERCASE label                                                   |
+| `variant`              | Array[`enum`,args…] / `enum`                                             |
+| `struct`/`obj`         | Object with field name keys                                              |
+| `string`/`str`         | String (necessarily UTF-8)                                               |
+| `bytes`/`data`         | String Base64-URL                                                        |
+| `decimal`/`dec`        | String: optional `-`, then either 1+ digits or 0+ digits, `.`, 1+ digits |
+| `uint`                 | Number within JS `MAX_SAFE_INTEGER`, `decimal` otherwise                 |
+| `int`                  | Number within JS `MIN/MAX_SAFE_INTEGER`, `decimal` otherwise             |
+| `ratio`                | String: optional `-`, 1+ digits, `/`, 1+ digits                          |
+| `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is ".5")                                |
+| `float16`/`f16`        | `bytes` IEEE 754 binary16                                                |
+| `float32`/`f32`        | `bytes` IEEE 754 binary32                                                |
+| `float64`/`f64`        | `bytes` IEEE 754 binary64 (Number avoided because JSON libraries vary)   |
+| `mask`                 | `list` of a mix of `string` and `list` (see below)                       |
+| `datetime`/`date`/`dt` | String: `YYYY-MM-DDTHH:MM:SS[+-]HH:MM` time and UTC offset optional      |
+| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_227`                         |
+| `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                              |
+| `code`                 | `string` strictly uppercase alphanumeric ASCII (i.e. "USD")              |
+| `language`/`lang`      | `code` IETF BCP-47                                                       |
+| `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                                |
+| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (no country prefix)                          |
+| `currency`/`curr`      | `code` ISO 4217 alpha-3                                                  |
+| `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure                       |
+| `text`                 | `map` of `lang,string` pairs / `string` for just one in a clear context  |
+| `amount`/`price`/`amt` | String: `decimal` and optionally space a `currency` (i.e. "1.23 CAD")    |
+| `quantity`/`qty`       | String: `decimal` and optionally space a `unit` (i.e. "1.23 GRM")        |
+| `ip`                   | `string` IPv4 or IPv6 notation                                           |
+| `subnet`/`cidr`/`net`  | `string` CIDR notation                                                   |
+
+## Canonical Encoding
+
+* When possible, Objects should be sorted by ascending key order.
+
+* Number, `decimal` and `ratio` must strip leading zeros and trailing decimal zeros.
+
+* `float16`, `float32` and `float64` are considered distinct types and thus canonical encoding does not require contracting larger precision floats into the smallest lossless precision.  This and the use of `bytes` to represent them is to keep implementation complexity lower.
+
+## Datetime
+
+Unlike RFC 3339, it is often very important to include the UTC offset with plain dates in order to calculate correct date differences.  We thus allow `YYYY-MM-DD[+-]HH:MM` for dates.
+
+Unspecified offset implies UTC ("Z" is optional).
+
+We preserve the "T" prefix for times in order to allow for dateless times.
 
 ## Struct
 
