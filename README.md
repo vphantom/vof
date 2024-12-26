@@ -22,6 +22,14 @@ Thus we have a schema-based format based on very simple types on the wire.  Unli
 
 The name "vanilla" was chosen to symbolize the aim to keep the format as simple and generic as possible.
 
+## Version Control Strategy
+
+Similarly to Google Protocol Buffers, since readers and writers must agree on a format out of band, basic rules must be followed to ensure good forward and backward compatibility:
+
+* Deprecated fields must never be reused;
+* Field types may be updated, but only in backwards-compatible ways (i.e. `int` vs `enum`);
+* Field IDs must never be reused.
+
 ### Status
 
 **BETA SPECIFICATION, NOT YET IMPLEMENTED**  The selection of high-level types may still change a little bit, but the main decisions have all been finalized.
@@ -30,6 +38,7 @@ The name "vanilla" was chosen to symbolize the aim to keep the format as simple 
 
 Reference implementations:
 
+- [ ] Update JSON spec with relevant bits added to Binary
 - [ ] JS (JSON only)
 - [ ] OCaml
 - [ ] Perl 5
