@@ -24,7 +24,9 @@ The name "vanilla" was chosen to symbolize the aim to keep the format as simple 
 
 ## Version Control Strategy
 
-Similarly to Google Protocol Buffers, since readers and writers must agree on a format out of band, basic rules must be followed to ensure good forward and backward compatibility:
+The format itself allows for very large numeric sizes and makes room for future more complex types with the concept of reserved tags.  This format is thus forward-compatible with future versions.
+
+Regarding schema evolution, similarly to Google Protocol Buffers, since readers and writers must agree on a format out of band, basic rules must be followed to ensure good forward and backward compatibility:
 
 * Deprecated fields must never be reused;
 * Field types may be updated, but only in backwards-compatible ways (i.e. `int` vs `enum`);

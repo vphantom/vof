@@ -16,43 +16,40 @@ Decoders encountering impossible input (including invalid UTF-8 in `string` data
 
 ### Control Values
 
-Small integers are compressed at the slight expense of larger ones similarly to Prefix Varint (a variation on LEB128 and VLQ which eliminates loops, most shifts and represents 64 bits in 9 bytes instead of 10).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Illustrated here from the decoder point of view, we see that very little work is involved:
+Small integers are compressed at the slight expense of larger ones similarly to the Prefix Varint format (itself a variation on LEB128 and VLQ which eliminates loops, most shifts and represents 64 bits in 9 bytes instead of 10).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Illustrated here from the decoder point of view, we see that very little computing is involved:
 
-| Byte (`c`) | Total Bytes | Type               | Condition | Description / Operation                                     |
-| ---------- | ----------- | ------------------ | --------- | ----------------------------------------------------------- |
-| `0_______` | 1           | Int 7-bit          | `< 128`   | `c`                                                         |
-| `10______` | 2           | Int 14-bit         | `< 192`   | `(next_byte() << 6) + c - 128`                              |
-| `110_____` | 3           | Int 21-bit         | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                         |
-| `11100___` | 4           | Int 27-bit         | `< 232`   | `(next_bytes_le(3) << 3) + c - 224`                         |
-|            | 5,6,7,8,9   | Int 32,40,48,56,64 | `< 237`   | `next_bytes_le(4)`, 5, 6, 7, 8                              |
-|            | 1           | List               | `< 243`   | Open (items until End), End, exactly 0,1,2,3 items          |
-|            | 1           | Struct             | `< 249`   | Open (groups until 128), empty, `01`, `001`, `011`, 1 group |
-|            | _varies_    | Data               | `< 251`   | Size + bytes, empty                                         |
-|            | 2,4,8       | Float              | `< 254`   | IEEE 754 floating point binary 16,32,64 bit precisions      |
-|            | 1           | Null               | `== 254`  |                                                             |
-|            | 1+V1+V2     | Tag                |           | V1 int qualifies V2, 0..63 user-defined, 64+ reserved       |
-
-**TODO:** See if we could squeeze List 4,5,6,7 in there somewhere, possibly by changing 236 to mean 26 bits instead of 27?
+| Byte (`c`) | Type                       | Condition | Description / Operation                                   |
+| ---------- | -------------------------- | --------- | --------------------------------------------------------- |
+| `0_______` | Int 7-bit                  | `< 128`   | `c`                                                       |
+| `10______` | Int 14-bit                 | `< 192`   | `(next_byte() << 6) + c - 128`                            |
+| `110_____` | Int 21-bit                 | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                       |
+| `111000__` | Int 26-bit                 | `< 228`   | `(next_bytes_le(3) << 2) + c - 224`                       |
+|            | Int 32,40,48,56,64,128,256 | `< 235`   | Next 4,5,6,7,8,16,32 bytes are int Little Endian          |
+|            | Float 16,32,64,128,256     | `< 240`   | Next 2,4,8,16,32 bytes are IEEE 754 floating point binary |
+|            | List                       | `== 240`  | Open (items until End)                                    |
+|            | List                       | `== 241`  | Close nearest `List Open`                                 |
+|            | List                       | `< 251`   | Exactly 0..8 items                                        |
+|            | Struct                     | `== 251`  | Open (groups until Close, defined below)                  |
+|            | Struct                     | `== 252`  | Open single group                                         |
+|            | Data                       | `== 253`  | Next value is size in bytes, then as many bytes follow    |
+|            | Null                       | `== 254`  |                                                           |
+|            | Tag                        |           | Next value is Int qualifier, then qualified value         |
 
 ### Canonical Encoding
 
-* Integers must be encoded in the smallest form possible.
+* Integers must be encoded in the smallest form possible.  Note that 128 and 256 bit integer support is not expected under normal circumstances and should only be used when readers are expected to support them.
 
-* Lists of 0, 1, 2 or 3 items must be encoded with the short forms 239, 240, 241, 242.  Thus maps of 0 or 1 pairs must be encoded as 239 and 241 respectively.  Open lists and maps have no maximum length.
+* Lists of 0..8 items must be encoded with the short forms 242..250.  Thus maps of 0..4 pairs must be encoded as 242, 244, 246, 248, 250.  Open lists and maps have no maximum length.
 
 * Lists used as key-value sequences (odd keys, even values) should be sorted by ascending key when buffering the whole list is possible, to facilitate higher-level compression.
 
-* Structs without content must be encoded in short form 244.
+* Structs without content must be encoded as an empty List (242).
 
-* Structs with fields 0, 0,1 or 0,1,2 must be encoded as a List in short form (240, 241, 242).
+* Structs with contiguous fields starting from 0 must be encoded as a List.
 
-* Structs with fields 1, 2 or 1,2 must be encoded with the shortcuts (245, 246, 247).
+* Structs with a single group (largest field ID < 8) must be encoded with the shortcut (252).
 
-* Structs with a single group must be encoded with the shortcut (248), multiple groups with the general case (243) which is terminated by 128 (see Struct below).
-
-* Empty Data must be encoded with the shortcut (250).  Other sizes use the general case (249) followed by an Int to specify the length, then the data bytes.  There is no limit to the size of the data.
-
-* Floating point numbers must be represented in the smallest form which does not lose precision.
+* Floating point numbers must be represented in the smallest form which does not lose precision.  Note that `-0.0` and `+0.0` are _not_ considered equivalent, however all `NaN` bit patterns are considered equal.  When converting between precisions, denormalized numbers should be normalized if the target precision can represent the exact value as a normal number.  This ensures minimal representation while maintaining precision.  Note that 128 and 256 bit floating point support is not expected under normal circumstances and should only be used when readers are expected to support them.
 
 ### Implicit List
 
@@ -82,11 +79,11 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | ---------------------- | --------------------------------------------------------------------- |
 | `null`                 | Null                                                                  |
 | `bool`                 | Int values `0` and `1`                                                |
-| `list`/`…s`            | List(0..3) + 0..3 vals / List Open + vals + Close                     |
+| `list`/`…s`            | List(0..8) + 0..8 vals / List Open + vals + Close                     |
 | `map`                  | `list` of alternating keys and values                                 |
 | `enum`                 | Int                                                                   |
 | `variant`              | `list[enum,args…]` / `enum`                                           |
-| `struct`/`obj`         | List(1..3) + values / Struct(0..3) + groups / Struct + groups + Close |
+| `struct`/`obj`         | List(0..8) + values / Struct(0..8) + groups / Struct + groups + Close |
 | `string`/`str`         | Data (empty) / Data + size + bytes as UTF-8                           |
 | `bytes`/`data`         | Same as `string` but without implied UTF-8                            |
 | `decimal`/`dec`        | Int as signed ("ZigZag") digits `<< 4` + 0..15 decimal places         |
@@ -161,7 +158,7 @@ The canonical encoding is to use the bare `string` form when a single language i
 
 ### Mask
 
-Compact equivalent to Protobuf's FieldMask.  In the context of a specific `struct` definition, an associated `mask` is a sorted `list` of field IDs where any field may be wrapped in a `list` in order to specify its child `struct`'s fields as well.  For example, fields 1, 2, 5, 6 where 5 is a sub-structure of which we want field 2 only would be encoded as: `[1,2,[5,2],6]`.  Useful in RPC where a service may declare which fields are available or a client may request a limited subset of available data (similar to SQL `SELECT`, PostgREST's "Vertical Filtering" or GraphQL).
+Compact equivalent to Protobuf's FieldMask.  In the context of a specific `struct` definition, an associated `mask` is a sorted `list` of field IDs where any field may be wrapped in a `list` in order to specify its child `struct`'s fields as well.  For example, fields 1, 2, 5, 6 where 5 is a sub-structure of which we want fields 2 and 3 only would be encoded as: `[1,2,[5,2,3],6]`.  Useful in RPC where a service may declare which fields are available or a client may request a limited subset of available data (similar to SQL `SELECT`, PostgREST's "Vertical Filtering" or GraphQL).
 
 ### References
 
@@ -175,9 +172,17 @@ For applications with table-specific ID namespaces, one strategy to benefit from
 
 ### User-Defined Types
 
-Tags 0..63 are available for applications to define their own types from our basic types.  For example, a user-defined "URL" type could be decided as Tag 0 followed by Data used as a `string`.  Obviously, this means that such tags may have completely different meanings across different applications, so their use makes the resulting data non-portable.
+Tags 0..63 are available for applications to define their own types from our basic types and 64+ are reserved.  For example, a user-defined "URL" type could be decided as Tag 0 followed by Data used as a `string`.  Obviously, this means that such tags may have completely different meanings across different applications, so their use makes the resulting data non-portable.  Decoders should fail when presented with unknown tags.
 
 ## Implementation Considerations
+
+### Large Precision Numbers
+
+Decoders without support for 128 or 256 bit integer or floating point numbers should fail when presented with such source data.
+
+### Strings
+
+Since strings are expected to be valid UTF-8, encoders and decoders should fail when presented with invalid UTF-8.
 
 ### Reference Tracking
 
