@@ -94,9 +94,11 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | `float16`/`f16`        | Float 16 (Little Endian)                                              |
 | `float32`/`f32`        | Float 32 (Little Endian)                                              |
 | `float64`/`f64`        | Float 64 (Little Endian)                                              |
+| `float128`/`f128`      | Float 128 (Little Endian)                                             |
+| `float256`/`f256`      | Float 256 (Little Endian)                                             |
 | `mask`                 | `list` of a mix of `uint` and `list` (recursive)                      |
 | `datetime`/`date`/`dt` | Struct of up to 7 fields (see Datetime)                               |
-| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_227`                      |
+| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_200`                      |
 | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                           |
 | `code`                 | `int` interpreted as base-36                                          |
 | `language`/`lang`      | `code` IETF BCP-47                                                    |
@@ -150,6 +152,8 @@ Codes are represented as a signed ("ZigZag") _positive_ integer, thus the maximu
 
 Caveat: this representation of codes, while compact, effectively strips leading zeros.  While this isn't a problem with the standards used here (for languages, units, etc.), it may be a problem with other uses, in which case a `string` is the safe choice.
 
+Note on JSON interoperability: because codes are strings in JSON VOF, leading zeros would be preserved on the JSON side while being stripped on the binary side.  Therefore, standard and custom codes should never begin with leading zeros.
+
 ### Text
 
 If multiple strings are provided with the same language code, the first one wins.  Used in its bare `string` form, it is up to the applications to agree on the choice of default language.
@@ -190,11 +194,14 @@ The index of references maintained by decoders should use `string` keys (thus co
 
 ### Decoding Security
 
-Malicious or random input could be used to create deeply nested structures that could exhaust stack space during parsing.  Decoders should probably limit total nesting depth to a reasonable level for their target system.  (128 might be a reasonable limit for most systems.)
+Implementations should consider reasonable limits on:
 
-Malicious or corrupt data sections could specify an incorrectly large size extending beyond the end of the chunk.  Decoded sizes must be checked for overflow.  In streaming inputs, this means setting a reasonable maximum size limit to avoid listening forever.  (1MB to 1GB might be reasonable, depending on the application.)
+* Total nesting depth (128 might be reasonable)
+* Maximum string length (1MB to 1GB might be reasonable)
+* Maximum number of object members (1K might be reasonable)
+* Time to wait between values and/or overall rate limiting
 
-When processing streaming inputs, implementations should consider timeouts between values and/or overall rate limiting to prevent denial-of-service through artificially slow feeds.  A timeout of 30-60 seconds between values is typical.
+Decoded data (and thus string) sizes must be checked for overflow: a corrupt or malicious size could extend well beyond the input.
 
 ### Thread Safety
 

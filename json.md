@@ -20,12 +20,14 @@ The following high-level types are standard (to be preferred to alternatives) bu
 | `int`                  | Number within JS `MIN/MAX_SAFE_INTEGER`, `decimal` otherwise             |
 | `ratio`                | String: optional `-`, 1+ digits, `/`, 1+ digits                          |
 | `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is ".5")                                |
-| `float16`/`f16`        | `bytes` IEEE 754 binary16                                                |
-| `float32`/`f32`        | `bytes` IEEE 754 binary32                                                |
-| `float64`/`f64`        | `bytes` IEEE 754 binary64 (Number avoided because JSON libraries vary)   |
+| `float16`/`f16`        | `bytes` IEEE 754 binary16 Little Endian                                  |
+| `float32`/`f32`        | `bytes` IEEE 754 binary32 Little Endian                                  |
+| `float64`/`f64`        | `bytes` IEEE 754 binary64 Little Endian                                  |
+| `float128`/`f128`      | `bytes` IEEE 754 binary128 Little Endian                                 |
+| `float256`/`f256`      | `bytes` IEEE 754 binary256 Little Endian                                 |
 | `mask`                 | `list` of a mix of `string` and `list` (see below)                       |
 | `datetime`/`date`/`dt` | String: `YYYY-MM-DDTHH:MM:SS[+-]HH:MM` time and UTC offset optional      |
-| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_227`                         |
+| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_200`                         |
 | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                              |
 | `code`                 | `string` strictly uppercase alphanumeric ASCII (i.e. "USD")              |
 | `language`/`lang`      | `code` IETF BCP-47                                                       |
@@ -41,13 +43,15 @@ The following high-level types are standard (to be preferred to alternatives) bu
 
 ## Canonical Encoding
 
-* When possible, Objects should be sorted by ascending key order.
+* When possible, Objects should be sorted by ascending key when buffering the whole list is possible, to facilitate higher-level compression.
 
 * Number, `decimal` and `ratio` must strip leading zeros and trailing decimal zeros.
 
-* `float16`, `float32` and `float64` are considered distinct types and thus canonical encoding does not require contracting larger precision floats into the smallest lossless precision.  This and the use of `bytes` to represent them is to keep implementation complexity lower.
+* Floating point numbers must be represented in the smallest form which does not lose precision.  Note that `-0.0` and `+0.0` are _not_ considered equivalent, however all `NaN` bit patterns are considered equal.  When converting between precisions, denormalized numbers should be normalized if the target precision can represent the exact value as a normal number.  This ensures minimal representation while maintaining precision.  Note that 128 and 256 bit floating point support is not expected under normal circumstances and should only be used when readers are expected to support them.
 
-## Datetime
+## Additional Notes on Types
+
+### Datetime
 
 Unlike RFC 3339, it is often very important to include the UTC offset with plain dates in order to calculate correct date differences.  We thus allow `YYYY-MM-DD[+-]HH:MM` for dates.
 
@@ -55,15 +59,31 @@ Unspecified offset implies UTC ("Z" is optional).
 
 We preserve the "T" prefix for times in order to allow for dateless times.
 
-## Struct
+### Timestamp
+
+This is a regular UNIX timestamp in seconds since an Epoch, except it is represented as an "Offset Julian Day", derived from NASA's Truncated Julian Day but using 60,000 days instead of 40,000. This means an offset of 1,677,283,200 seconds or 2023-02-25 00:00:00 UTC.  (This is "UNIX time", which does not include leap seconds, hence the 27 or 37 second offset from what you may expect.)
+
+### Code
+
+Codes prefixed with `_` are reserved for user-defined alternatives anywhere `code` is used (i.e. a custom language `FR` in the negative space would be distinct from positive `FR`, which is standard in IETF BCP-47).  While the use of custom codes is discouraged, this scheme makes it possible.
+
+Note on binary interoperability: because codes are numeric in binary VOF, leading zeros, while valid in JSON, would be truncated by a binary conversion.  Therefore, standard and custom codes should never begin with leading zeros.
+
+### Struct
 
 Similar to Protobuf's messages, their fields are named and should remain reserved forever when they are deprecated to avoid version conflicts.
 
-## Mask
+### Text
+
+If multiple strings are provided with the same language code, the first one wins.  Used in its bare `string` form, it is up to the applications to agree on the choice of default language.
+
+The canonical encoding is to use the bare `string` form when a single language is used and corresponds to the default language (if one is defined), to minimize space.
+
+### Mask
 
 Equivalent to Protobuf's FieldMask.  In the context of a specific `struct` definition, an associated `mask` is `list` of field names where any field may be wrapped in a `list` in order to select its child `struct`'s fields as well.  For example, fields "id", "name", "user", "type" where "user" is a sub-structure of which we want field "country" only would be encoded as: `["id","name",["user","country"],"type"]`.  Useful in RPC where a service may declare which fields are available or a client may request a limited subset of available data (similar to SQL `SELECT`, PostgREST's "Vertical Filtering" or GraphQL).
 
-## References
+### References
 
 References at our level are much more efficient than an external compression scheme would be (i.e. gzip) because references let decoders reuse the same decoded resources, without having to expose a distinction between references by ID vs full inclusion at the application level.  This lets API designers include child objects uniformly in their schemas without worrying about redundancy in memory nor on the wire.
 
@@ -91,3 +111,29 @@ Full example:
    ]
 }
 ```
+
+### User-Defined Types
+
+Tags are represented in JSON as objects with a single member whose key is a string starting with "@" followed by a number 0..63, with the value being the tagged value. For example, a user-defined "URL" type could be decided as `{"@0": "https://example.com"}`. Such tags may have completely different meanings across different applications, so their use makes the resulting data non-portable. Decoders should fail when presented with unknown tags.
+
+## Implementation Considerations
+
+### Large Precision Numbers
+
+JSON libraries without support for 128 or 256 bit numbers should fail when presented with such values.
+
+### String Validation
+
+Since strings are expected to be valid UTF-8, encoders and decoders should fail when presented with invalid UTF-8.
+
+### Reference Tracking
+
+The index of references maintained by decoders should use `string` keys (thus converting numeric references to `string` ones) to avoid imposing a possible distinction between equivalent values of both types to encoders.
+
+### Decoding Security
+
+Implementations should consider reasonable limits on:
+
+* Total nesting depth (128 might be reasonable)
+* Maximum string length (1MB to 1GB might be reasonable)
+* Maximum number of object members (1K might be reasonable)
