@@ -25,7 +25,7 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 | `110_____` | Int 21-bit                 | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                       |
 | `111000__` | Int 26-bit                 | `< 228`   | `(next_bytes_le(3) << 2) + c - 224`                       |
 |            | Int 32,40,48,56,64,128,256 | `< 235`   | Next 4,5,6,7,8,16,32 bytes are int Little Endian          |
-|            | Float 16,32,64,128,256     | `< 240`   | Next 2,4,8,16,32 bytes are IEEE 754 floating point binary |
+|            | Float 16,32,64,128,256     | `< 240`   | Next 2,4,8,16,32 bytes are IEEE 754 Little Endian         |
 |            | List                       | `== 240`  | Open (items until End)                                    |
 |            | List                       | `== 241`  | Close nearest `List Open`                                 |
 |            | List                       | `< 251`   | Exactly 0..8 items                                        |
@@ -95,11 +95,11 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | `int`                  | Int signed ("ZigZag")                                                 |
 | `ratio`                | `list[int,uint]` where the denominator must not be zero               |
 | `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                              |
-| `float16`/`f16`        | Float 16 (Little Endian)                                              |
-| `float32`/`f32`        | Float 32 (Little Endian)                                              |
-| `float64`/`f64`        | Float 64 (Little Endian)                                              |
-| `float128`/`f128`      | Float 128 (Little Endian)                                             |
-| `float256`/`f256`      | Float 256 (Little Endian)                                             |
+| `float16`/`f16`        | Float 16                                                              |
+| `float32`/`f32`        | Float 32                                                              |
+| `float64`/`f64`        | Float 64                                                              |
+| `float128`/`f128`      | Float 128                                                             |
+| `float256`/`f256`      | Float 256                                                             |
 | `mask`                 | `list` of a mix of `uint` and `list` (recursive)                      |
 | `datetime`/`date`/`dt` | Struct of up to 7 fields (see Datetime)                               |
 | `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_200`                      |
