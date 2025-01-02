@@ -36,21 +36,33 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 Release Candidate 1 - 2025-01-01
 
-No structural changes are expected, but some verifications are still needed.
+No structural changes are expected, but some verifications are still needed.  In particular the portability of IEEE floating point numbers is not yet validated.
 
 ## ROADMAP
 
-This is currently a backburner project, so there are no milestone dates.
+### Internal Use Release
 
+- [ ] Confirm float choice vs a "Prefix Varfloat" scheme. Do floats have Endianness?
 - [x] Finalize specification
-- [ ] Perl 5 reference implementation
-- [ ] Test round-trips to try to catch design issues
+- [ ] Perl 5
+- [ ] Test round-trips to try to catch fatal design issues
 - [ ] OCaml
+
+### First Public Release
+
+Before officially accepting contributions, I'd like to cover a few more implementations to make sure we are good to go.
+
+- [ ] Create data files to help test all implementations
+- [ ] Create a `CONTRIBUTING.md`
+- [ ] Have the docs proofread for clarity
+- [ ] JavaScript / TypeScript
 - [ ] Python
 - [ ] C / C++
+
+### Future Improvements
+
 - [ ] Java / Kotlin
 - [ ] C# / F#
-- [ ] JavaScript / TypeScript
 - [ ] Go
 - [ ] PHP
 - [ ] Rust
