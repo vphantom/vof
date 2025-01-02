@@ -63,13 +63,17 @@ When an integer is considered signed, its least significant bit before encoding 
 
 Similar to Protobuf's messages, their fields are numbered from 0.  Structs are groups of values, each structured as a field identification byte followed by as many values as the byte specifies.  Fields must thus be encoded in ascending numeric order.  The initial implied previous field ID is -1, so the Delta of an initial field 0 is 0.
 
-| Byte       | Condition | Description                                                   |
-| ---------- | --------- | ------------------------------------------------------------- |
-| `0_______` | `< 128`   | Delta (1..128) from previous field ID, 1 value follows        |
-| `10000000` | `== 128`  | Close nearest `Struct Open`                                   |
-| `1_______` |           | The 7 low bits map the next fields, 1 value per 1 bit follows |
+Within a struct (after a `Struct Open` or `Struct Open Single` control byte), fields are organized into groups for efficiency. Each group begins with a control byte that indicates which fields are present:
 
-Field numbers and names should remain reserved forever when they are deprecated to avoid version conflicts.
+* If the byte is < 128, it represents a delta to add to the last field ID to get the current one, which will be followed by a single value.
+* If the byte is 128, it marks the end of the nearest `Struct Open`, a `Struct Close`.
+* If the byte is > 128, its least significant 7 bits form a bitmap indicating which of the next 7 next field IDs (relative to the last) are present, followed by as many values as the bitmap has 1 bits set.
+
+For example:
+* `11100000` (224) means fields at positions +0, +1 are present, but +2 through +6 are absent
+* `10000001` (129) means fields at positions +0, +6 are present, but +1 through +5 are absent
+
+Note that field numbers and names should remain reserved forever when they are deprecated to avoid version conflicts in your schemas.
 
 ## DATA TYPES
 

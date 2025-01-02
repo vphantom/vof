@@ -32,18 +32,30 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 * Field types may be updated, but only in backwards-compatible ways (i.e. `int` vs `enum`);
 * Field IDs must never be reused.
 
-### Status
+### Specification Status
 
-**BETA SPECIFICATION, NOT YET IMPLEMENTED**  The selection of high-level types may still change a little bit, but the main decisions have all been finalized.
+Release Candidate 1 - 2025-01-01
+
+No structural changes are expected, but some verifications are still needed.
 
 ## ROADMAP
 
-Reference implementations:
+This is currently a backburner project, so there are no milestone dates.
 
-- [ ] Update JSON spec with relevant bits added to Binary
-- [ ] JS (JSON only)
+- [x] Finalize specification
+- [ ] Perl 5 reference implementation
+- [ ] Test round-trips to try to catch design issues
 - [ ] OCaml
-- [ ] Perl 5
+- [ ] Python
+- [ ] C / C++
+- [ ] Java / Kotlin
+- [ ] C# / F#
+- [ ] JavaScript / TypeScript
+- [ ] Go
+- [ ] PHP
+- [ ] Rust
+- [ ] Ruby
+- [ ] Swift
 
 ## SPECIFICATIONS
 
@@ -56,7 +68,7 @@ Graph X Design Inc. https://www.gxd.ca/ sponsored part of this project.
 
 ## LICENSE AND COPYRIGHT
 
-Copyright (c) 2023-2024 Stéphane Lavergne <https://github.com/vphantom>
+Copyright (c) 2023-2025 Stéphane Lavergne <https://github.com/vphantom>
 
 Distributed under the MIT (X11) License:
 http://www.opensource.org/licenses/mit-license.php
