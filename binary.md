@@ -8,7 +8,7 @@ Optionally, writers may prefix their output with Tag 649920 applied to Int 102, 
 
 The suggested MIME type for binary encoded transfers is `application/x-vanilla-object` while JSON remains `application/json`.
 
-The suggested file name extension is `.vof`.
+The suggested file name extension is `.vo`.
 
 The choice to stream or assemble as a single chunk is left to developers based on their applications' needs.  The main use case for streaming would be for sending a large (>100) or unknown number of results to some query.
 
@@ -30,7 +30,7 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 |            | List                       | `== 241`  | Close nearest `List Open`                                 |
 |            | List                       | `< 251`   | Exactly 0..8 items                                        |
 |            | Struct                     | `== 251`  | Open (groups until Close, defined below)                  |
-|            | Struct                     | `== 252`  | Open single group                                         |
+|            | Struct                     | `== 252`  | Open single group, no Close necessary                     |
 |            | Data                       | `== 253`  | Next value is size in bytes, then as many bytes follow    |
 |            | Null                       | `== 254`  |                                                           |
 |            | Tag                        |           | Next value is Int qualifier, then qualified value         |
@@ -61,15 +61,16 @@ When an integer is considered signed, its least significant bit before encoding 
 
 ### Struct
 
-Similar to Protobuf's messages, their fields are numbered from 0.  Structs are groups of values, each structured as a field identification byte followed by as many values as the byte specifies.  Fields must thus be encoded in ascending numeric order.  The initial implied previous field ID is -1, so the Delta of an initial field 0 is 0.
+Similar to Protobuf's messages, their fields are numbered from 0.  Structs are groups of values, each structured as a field identification byte followed by as many values as the byte specifies.  Fields must thus be encoded in ascending numeric order.
 
 Within a struct (after a `Struct Open` or `Struct Open Single` control byte), fields are organized into groups for efficiency. Each group begins with a control byte that indicates which fields are present:
 
-* If the byte is < 128, it represents a delta to add to the last field ID to get the current one, which will be followed by a single value.
+* If the byte is < 128, it represents the "gap", the number of fields to skip after the last field ID, which will be followed by a single value.
 * If the byte is 128, it marks the end of the nearest `Struct Open`, a `Struct Close`.
 * If the byte is > 128, its least significant 7 bits form a bitmap indicating which of the next 7 next field IDs (relative to the last) are present, followed by as many values as the bitmap has 1 bits set.
 
 For example:
+* `00000010` (2) means skip 2 field IDs (i.e. if the last field ID was 3, we now encode ID 6)
 * `11100000` (224) means fields at positions +0, +1 are present, but +2 through +6 are absent
 * `10000001` (129) means fields at positions +0, +6 are present, but +1 through +5 are absent
 
@@ -79,42 +80,43 @@ Note that field numbers and names should remain reserved forever when they are d
 
 These higher-level types are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.
 
-| Name                   | Wire Encoding                                                         |
-| ---------------------- | --------------------------------------------------------------------- |
-| `null`                 | Null                                                                  |
-| `bool`                 | Int values `0` and `1`                                                |
-| `list`/`…s`            | List(0..8) + 0..8 vals / List Open + vals + Close                     |
-| `map`                  | `list` of alternating keys and values                                 |
-| `enum`                 | Int                                                                   |
-| `variant`              | `list[enum,args…]` / `enum`                                           |
+| Name                   | Wire Encoding                                                |
+| ---------------------- | ------------------------------------------------------------ |
+| `null`                 | Null                                                         |
+| `bool`                 | Int values `0` and `1`                                       |
+| `list`/`…s`            | List(0..8) + 0..8 vals / List Open + vals + Close            |
+| `map`                  | `list` of alternating keys and values                        |
+| `enum`                 | Int                                                          |
+| `variant`              | `list[enum,args…]` / `enum`                                  |
 | `struct`/`obj`         | List(0..8) + values / Struct(0..8) + groups / Struct + groups + Close |
-| `string`/`str`         | Data (empty) / Data + size + bytes as UTF-8                           |
-| `bytes`/`data`         | Same as `string` but without implied UTF-8                            |
-| `decimal`/`dec`        | Int as signed ("ZigZag") digits `<< 4` + 0..15 decimal places         |
-| `uint`                 | Int                                                                   |
-| `int`                  | Int signed ("ZigZag")                                                 |
-| `ratio`                | `list[int,uint]` where the denominator must not be zero               |
-| `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                              |
-| `float16`/`f16`        | Float 16                                                              |
-| `float32`/`f32`        | Float 32                                                              |
-| `float64`/`f64`        | Float 64                                                              |
-| `float128`/`f128`      | Float 128                                                             |
-| `float256`/`f256`      | Float 256                                                             |
-| `mask`                 | `list` of a mix of `uint` and `list` (recursive)                      |
-| `datetime`/`date`/`dt` | Struct of up to 7 fields (see Datetime)                               |
-| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_200`                      |
-| `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                           |
-| `code`                 | `int` interpreted as base-36                                          |
-| `language`/`lang`      | `code` IETF BCP-47                                                    |
-| `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                             |
-| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (without country prefix)                  |
-| `currency`/`curr`      | `code` ISO 4217 alpha-3                                               |
-| `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure                    |
-| `text`                 | `map` of `lang,string` pairs / `string`                               |
-| `amount`/`price`/`amt` | `list[decimal,currency]` / `decimal`                                  |
-| `quantity`/`qty`       | `list[decimal,unit]` / `decimal`                                      |
-| `ip`                   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                             |
-| `subnet`/`cidr`/`net`  | `list[ip,uint]` CIDR notation: IP with netmask size in bits           |
+| `string`/`str`         | Data (empty) / Data + size + bytes as UTF-8                  |
+| `bytes`/`data`         | Same as `string` but without implied UTF-8                   |
+| `decimal`/`dec`        | Int as signed ("ZigZag") `<< 4` + 0..15 decimal places       |
+| `uint`                 | Int                                                          |
+| `int`                  | Int signed ("ZigZag")                                        |
+| `ratio`                | `list[int,uint]` where the denominator must not be zero      |
+| `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                     |
+| `float16`/`f16`        | Float 16                                                     |
+| `float32`/`f32`        | Float 32                                                     |
+| `float64`/`f64`        | Float 64                                                     |
+| `float128`/`f128`      | Float 128                                                    |
+| `float256`/`f256`      | Float 256                                                    |
+| `mask`                 | `list` of a mix of `uint` and `list` (recursive)             |
+| `datetime`/`date`/`dt` | `uint` (see Datetime)                                        |
+| `timespan`/`span`      | `uint` (see Timespan)                                        |
+| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1,750,750,750`             |
+| `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                  |
+| `code`                 | `string` strictly uppercase alphanumeric ASCII (i.e. "USD")  |
+| `language`/`lang`      | `code` IETF BCP-47                                           |
+| `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                    |
+| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (without country prefix)         |
+| `currency`/`curr`      | `code` ISO 4217 alpha-3                                      |
+| `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure           |
+| `text`                 | `map` of `lang,string` pairs / `string` for just one in a clear context  |
+| `amount`/`price`/`amt` | `list[decimal,currency]` / `decimal`                         |
+| `quantity`/`qty`       | `list[decimal,unit]` / `decimal`                             |
+| `ip`                   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                    |
+| `subnet`/`cidr`/`net`  | `list[ip,uint]` CIDR notation: IP with netmask size in bits  |
 
 ### Map
 
@@ -128,35 +130,16 @@ The canonical encoding is the smallest representation possible.  For example, 1.
 
 ### Datetime
 
-Calendar concept, thus subject to a time zone.  Intended to be specified in any precision such as simple dates or dates with times.  Zero values should be omitted.  Non-zero UTC offsets are important even with dates in order to calculate correct differences.  Fields:
+Calendar and wall clock time, sortable.  Time zone is outside the scope of this type, derived from context as necessary.  Structured with minute precision in 28 bits as `(year << 20) + (month << 16) + (day << 11) + (hour << 6) + minute` where:
+* **year** — Number of years since 1900 (i.e. 2025 is 125)
+* **month** — 1..12
+* **day** — 1..31
+* **hour** — 0..23
+* **minute** — 0..59
 
-* **0: year** `int` offset from 2023
+### Timespan
 
-* **1: month** `int` 1..12
-
-* **2: day** `int` 1..31
-
-* **3: hours** `int` 0..23
-
-* **4: minutes** `int` 0..59
-
-* **5: seconds** `int` 0..59
-
-* **6: offset** `int` -720..+840 minutes from UTC
-
-With its signed integers, this may also be used to represent time spans.  In that use case, `offset` must not be specified.  For example, "yesterday next year" could be represented as `{year:1,day:-1}`.  The offset from 2023 keeps year representations shorter for typical current-day applications.
-
-### Timestamp
-
-This is a regular UNIX timestamp in seconds since an Epoch, except it is represented as an "Offset Julian Day", derived from NASA's Truncated Julian Day but using 60,000 days instead of 40,000. This means an offset of 1,677,283,200 seconds or 2023-02-25 00:00:00 UTC.  (This is "UNIX time", which does not include leap seconds, hence the 27 or 37 second offset from what you may expect.)
-
-### Code
-
-Codes are represented as a signed ("ZigZag") _positive_ integer, thus the maximum length of the string they represent is 11 characters.  The negative space is reserved for user-defined alternatives anywhere `code` is used (i.e. a custom language `FR` in the negative space would be distinct from positive `FR`, which is standard in IETF BCP-47).  While the use of custom codes is discouraged, this scheme makes it possible.
-
-Caveat: this representation of codes, while compact, effectively strips leading zeros.  While this isn't a problem with the standards used here (for languages, units, etc.), it may be a problem with other uses, in which case a `string` is the safe choice.
-
-Note on JSON interoperability: because codes are strings in JSON VOF, leading zeros would be preserved on the JSON side while being stripped on the binary side.  Therefore, standard and custom codes should never begin with leading zeros.
+Calendar duration expressed as half-months, days and seconds, each signed and applied in three steps in that order when it is used.  Structured in 40 bits as `((half_months + 1023) << 29) + ((days + 511)  << 17) + (seconds + 262143)` giving a range of -1023..1023 half-months, -511..511 days and -262143..262143 seconds.
 
 ### Text
 

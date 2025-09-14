@@ -26,13 +26,14 @@ The following high-level types are standard (to be preferred to alternatives) bu
 | `float128`/`f128`      | `bytes` IEEE 754 binary128 Little Endian                                 |
 | `float256`/`f256`      | `bytes` IEEE 754 binary256 Little Endian                                 |
 | `mask`                 | `list` of a mix of `string` and `list` (see below)                       |
-| `datetime`/`date`/`dt` | String: `YYYY-MM-DDTHH:MM:SS[+-]HH:MM` time and UTC offset optional      |
-| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1_677_283_200`                         |
+| `datetime`/`date`/`dt` | String: `YYYY-MM-DD HH:MM` (see below)                                   |
+| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1,750,750,750`                         |
+| `timespan`/`span`      | `list` of three `int` (see below)                                        |
 | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                              |
 | `code`                 | `string` strictly uppercase alphanumeric ASCII (i.e. "USD")              |
 | `language`/`lang`      | `code` IETF BCP-47                                                       |
 | `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                                |
-| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (no country prefix)                          |
+| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (without country prefix)                     |
 | `currency`/`curr`      | `code` ISO 4217 alpha-3                                                  |
 | `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure                       |
 | `text`                 | `map` of `lang,string` pairs / `string` for just one in a clear context  |
@@ -53,15 +54,11 @@ The following high-level types are standard (to be preferred to alternatives) bu
 
 ### Datetime
 
-Unlike RFC 3339, it is often very important to include the UTC offset with plain dates in order to calculate correct date differences.  We thus allow `YYYY-MM-DD[+-]HH:MM` for dates.
+Calendar and wall clock time.  Time zone is outside the scope of this type, derived from context as necessary.
 
-Unspecified offset implies UTC ("Z" is optional).
+## Timespan
 
-We preserve the "T" prefix for times in order to allow for dateless times.
-
-### Timestamp
-
-This is a regular UNIX timestamp in seconds since an Epoch, except it is represented as an "Offset Julian Day", derived from NASA's Truncated Julian Day but using 60,000 days instead of 40,000. This means an offset of 1,677,283,200 seconds or 2023-02-25 00:00:00 UTC.  (This is "UNIX time", which does not include leap seconds, hence the 27 or 37 second offset from what you may expect.)
+Calendar duration expressed as half-months, days and seconds, each signed and applied in three steps in that order when it is used.
 
 ### Code
 

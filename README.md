@@ -34,7 +34,7 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 ### Specification Status
 
-Release Candidate 1 - 2025-01-01
+Release Candidate 2 - 2025-09-14
 
 No structural changes are expected, but some verifications are still needed.  In particular the portability of IEEE floating point numbers is not yet validated.
 
@@ -42,6 +42,9 @@ No structural changes are expected, but some verifications are still needed.  In
 
 ### Internal Use Release
 
+- [x] Deprecate `code` type, downgrade use cases to uppercase strings.
+- [x] Refactor `datetime` type into a bit field.
+- [x] New `timespan` bit field.
 - [ ] Confirm float choice vs a "Prefix Varfloat" scheme. Do floats have Endianness?
 - [x] Finalize specification
 - [ ] Perl 5
