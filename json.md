@@ -10,8 +10,7 @@ The following high-level types are standard (to be preferred to alternatives) bu
 | `bool`                 | Boolean                                                                  |
 | `list`/`…s`            | Array                                                                    |
 | `map`                  | Object                                                                   |
-| `enum`                 | String UPPERCASE label                                                   |
-| `variant`              | Array[`enum`,args…] / `enum`                                             |
+| `variant`/`enum`       | Array[`string`,args…] / `string` with first or all letters uppercased    |
 | `struct`/`obj`         | Object with field name keys                                              |
 | `string`/`str`         | String (necessarily UTF-8)                                               |
 | `bytes`/`data`         | String Base64-URL                                                        |

@@ -18,8 +18,6 @@ Really, yet another serialization format?  Yes, but one of the simplest!  This f
 * Enough explicit type information for inspection of unknown data
 * Explicit binary-JSON interoperability (like Protobuf)
 
-Thus we have a schema-based format based on very simple types on the wire.  Unlike Protobuf, Thrift, Avro, etc. we do not define an interface description language (IDL) and instead rely on implicit typing, much like how JSON and CBOR APIs are usually documented and implemented in the wild.
-
 The name "vanilla" was chosen to symbolize the aim to keep the format as simple and generic as possible.
 
 ## Version Control Strategy
@@ -38,14 +36,18 @@ Release Candidate 2 - 2025-09-14
 
 No structural changes are expected, but some verifications are still needed.  In particular the portability of IEEE floating point numbers is not yet validated.
 
+An IDL is coming to help structure implementations and share schemas.
+
 ## ROADMAP
 
 ### Internal Use Release
 
 - [x] Deprecate `code` type, downgrade use cases to uppercase strings.
 - [x] Refactor `datetime` type into a bit field.
+- [x] Merge `enum` into `variant` type.
 - [x] New `timespan` bit field.
-- [ ] Confirm float choice vs a "Prefix Varfloat" scheme. Do floats have Endianness?
+- [ ] Introduce JSON IDL.
+- [ ] Confirm float choice is unambiguous. (We already know that "VarFloat" would waste space.)
 - [x] Finalize specification
 - [ ] Perl 5
 - [ ] Test round-trips to try to catch fatal design issues

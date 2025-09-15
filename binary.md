@@ -86,8 +86,7 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | `bool`                 | Int values `0` and `1`                                       |
 | `list`/`…s`            | List(0..8) + 0..8 vals / List Open + vals + Close            |
 | `map`                  | `list` of alternating keys and values                        |
-| `enum`                 | Int                                                          |
-| `variant`              | `list[enum,args…]` / `enum`                                  |
+| `variant`/`enum`       | `list[Int,args…]` / `Int`                                    |
 | `struct`/`obj`         | List(0..8) + values / Struct(0..8) + groups / Struct + groups + Close |
 | `string`/`str`         | Data (empty) / Data + size + bytes as UTF-8                  |
 | `bytes`/`data`         | Same as `string` but without implied UTF-8                   |
