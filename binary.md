@@ -95,7 +95,7 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | `struct`/`obj`         | List(0..7) + values / Struct + group / StructOpen + groups + Close |
 | `string`/`str`         | String + size + bytes as UTF-8                               |
 | `bytes`/`data`         | Data + size + raw bytes                                      |
-| `decimal`/`dec`        | Int as signed ("ZigZag") `<< 4` + 0..15 decimal places       |
+| `decimal`/`dec`        | Int as signed ("ZigZag") `<< 3` + 0..9 places (see below)    |
 | `uint`                 | Int                                                          |
 | `int`                  | Int signed ("ZigZag")                                        |
 | `ratio`                | `list[int,uint]` where the denominator must not be zero      |
@@ -129,7 +129,7 @@ Maps should not provide multiple values for the same key.  Encoders must fail wh
 
 ### Decimal
 
-A signed ("ZigZag") integer left-shifted 4 bits followed by an unsigned nibble representing 0..15 decimal places.  For example, -2.135 would be -2135 and 3 places, or `4269 << 4 + 3 = 68307`, which is then encoded as a 21-bit `int` on the wire.
+A signed ("ZigZag") integer left-shifted 3 bits to make room for a 3-bit value representing 0, 1, 2, 3, 4, 5, 6 or 9 decimal places.  For example, -2.135 would be -2135 and 3 places, or `(4269 << 3) + 3 = 34155`, which would then be encoded as a 21-bit `Int` on the wire.
 
 The canonical encoding is the smallest representation possible.  For example, 1.1 should be represented as "11 with 1 decimal place", not as "110 with 2 decimal places" and such.
 

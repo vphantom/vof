@@ -14,7 +14,7 @@ The following high-level types are standard (to be preferred to alternatives) bu
 | `struct`/`obj`         | Object with field name keys                                              |
 | `string`/`str`         | String (necessarily UTF-8)                                               |
 | `bytes`/`data`         | String Base64-URL                                                        |
-| `decimal`/`dec`        | String: optional `-`, then either 1+ digits or 0+ digits, `.`, 1+ digits |
+| `decimal`/`dec`        | String: optional `-`, then 1+ digits, then possibly `.` and 1+ digits    |
 | `uint`                 | Number within JS `MAX_SAFE_INTEGER`, `decimal` otherwise                 |
 | `int`                  | Number within JS `MIN/MAX_SAFE_INTEGER`, `decimal` otherwise             |
 | `ratio`                | String: optional `-`, 1+ digits, `/`, 1+ digits                          |

@@ -32,7 +32,7 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 ### Specification Status
 
-Release Candidate 3 - 2025-09-18
+Release Candidate 4 - 2025-09-19
 
 No structural changes are expected, but some verifications are still needed.  In particular the portability of IEEE floating point numbers is not yet validated.
 
