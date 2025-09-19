@@ -34,8 +34,6 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 Release Candidate 4 - 2025-09-19
 
-No structural changes are expected, but some verifications are still needed.  In particular the portability of IEEE floating point numbers is not yet validated.
-
 An IDL is coming to help structure implementations and share schemas.
 
 ## ROADMAP
@@ -47,7 +45,7 @@ An IDL is coming to help structure implementations and share schemas.
 - [x] Merge `enum` into `variant` type.
 - [x] New `timespan` bit field.
 - [ ] Introduce JSON IDL.
-- [ ] Confirm float choice is unambiguous. (We already know that "VarFloat" would waste space.)
+- [x] Confirm float choice
 - [x] Finalize specification
 - [ ] Perl 5
 - [ ] Test round-trips to try to catch fatal design issues

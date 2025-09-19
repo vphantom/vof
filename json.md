@@ -19,25 +19,24 @@ The following high-level types are standard (to be preferred to alternatives) bu
 | `int`                  | Number within JS `MIN/MAX_SAFE_INTEGER`, `decimal` otherwise             |
 | `ratio`                | String: optional `-`, 1+ digits, `/`, 1+ digits                          |
 | `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is ".5")                                |
-| `float16`/`f16`        | `bytes` IEEE 754 binary16 Little Endian                                  |
-| `float32`/`f32`        | `bytes` IEEE 754 binary32 Little Endian                                  |
-| `float64`/`f64`        | `bytes` IEEE 754 binary64 Little Endian                                  |
-| `float128`/`f128`      | `bytes` IEEE 754 binary128 Little Endian                                 |
-| `float256`/`f256`      | `bytes` IEEE 754 binary256 Little Endian                                 |
+| `float16,32,64`        | Number                                                                   |
+| `float128,256`         | `bytes` IEEE 754 binary128 / binary256 Little Endian                     |
 | `mask`                 | `list` of a mix of `string` and `list` (see below)                       |
 | `date`/`_on`           | `uint` as YYYYMMDD (see below)                                           |
 | `datetime`/`time`      | `uint` as YYYYMMDDHHMM (see below)                                       |
 | `timestamp`/`ts`/`_at` | `int` seconds since UNIX Epoch `- 1,750,750,750`                         |
 | `timespan`/`span`      | `list` of three `int` (see below)                                        |
 | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                              |
-| `code`                 | `string` strictly uppercase alphanumeric ASCII (i.e. "USD")              |
+| `code`                 | `string` strictly `[A-Z0-9_]` (i.e. "USD")                               |
 | `language`/`lang`      | `code` IETF BCP-47                                                       |
 | `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                                |
 | `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (without country prefix)                     |
 | `currency`/`curr`      | `code` ISO 4217 alpha-3                                                  |
+| `tax_code`             | `code` "CC[_RRR]_X": ISO 3166-1, ISO 3166-2, acronym                     |
 | `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure                       |
 | `text`                 | `map` of `lang,string` pairs / `string` for just one in a clear context  |
-| `amount`/`price`/`amt` | String: `decimal` and optionally space a `currency` (i.e. "1.23 CAD")    |
+| `amount`/`price`/`amt` | String: `decimal` and optionally space + `currency` (i.e. "1.23 CAD")    |
+| `tax`/`tax_amt`        | String: `decimal`, optional space + `currency`, mandatory space + `tax_code` |
 | `quantity`/`qty`       | String: `decimal` and optionally space a `unit` (i.e. "1.23 GRM")        |
 | `ip`                   | `string` IPv4 or IPv6 notation                                           |
 | `subnet`/`cidr`/`net`  | `string` CIDR notation                                                   |

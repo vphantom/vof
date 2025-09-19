@@ -85,43 +85,41 @@ Note that field numbers and names should remain reserved forever when they are d
 
 These higher-level types are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.
 
-| Name                   | Wire Encoding                                                |
-| ---------------------- | ------------------------------------------------------------ |
-| `null`                 | Null                                                         |
-| `bool`                 | Boolean True / Boolean False                                 |
-| `list`/`…s`            | List(0..7) + 0..7 vals / List Open + vals + Close            |
-| `map`                  | `list` of alternating keys and values                        |
-| `variant`/`enum`       | `list[Int,args…]` / `Int`                                    |
-| `struct`/`obj`         | List(0..7) + values / Struct + group / StructOpen + groups + Close |
-| `string`/`str`         | String + size + bytes as UTF-8                               |
-| `bytes`/`data`         | Data + size + raw bytes                                      |
-| `decimal`/`dec`        | Int as signed ("ZigZag") `<< 3` + 0..9 places (see below)    |
-| `uint`                 | Int                                                          |
-| `int`                  | Int signed ("ZigZag")                                        |
-| `ratio`                | `list[int,uint]` where the denominator must not be zero      |
-| `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                     |
-| `float16`/`f16`        | Float 16                                                     |
-| `float32`/`f32`        | Float 32                                                     |
-| `float64`/`f64`        | Float 64                                                     |
-| `float128`/`f128`      | Float 128                                                    |
-| `float256`/`f256`      | Float 256                                                    |
-| `mask`                 | `list` of a mix of `uint` and `list` (recursive)             |
-| `date`/`_on`           | `uint` (see below)                                           |
-| `datetime`/`time`      | `uint` (see below)                                           |
-| `timestamp`/`_ts`      | `int` seconds since UNIX Epoch `- 1,750,750,750`             |
-| `timespan`/`span`      | `uint` (see below)                                           |
-| `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                  |
-| `code`                 | `string` strictly uppercase alphanumeric ASCII (i.e. "USD")  |
-| `language`/`lang`      | `code` IETF BCP-47                                           |
-| `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                    |
-| `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (without country prefix)         |
-| `currency`/`curr`      | `code` ISO 4217 alpha-3                                      |
-| `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure           |
-| `text`                 | `map` of `lang,string` pairs / `string` for just one in a clear context  |
-| `amount`/`price`/`amt` | `list[decimal,currency]` / `decimal`                         |
-| `quantity`/`qty`       | `list[decimal,unit]` / `decimal`                             |
-| `ip`                   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                    |
-| `subnet`/`cidr`/`net`  | `list[ip,uint]` CIDR notation: IP with netmask size in bits  |
+| Name                    | Wire Encoding                                                |
+| ----------------------- | ------------------------------------------------------------ |
+| `null`                  | Null                                                         |
+| `bool`                  | Boolean True / Boolean False                                 |
+| `list`/`…s`             | List(0..7) + 0..7 vals / List Open + vals + Close            |
+| `map`                   | `list` of alternating keys and values                        |
+| `variant`/`enum`        | `list[Int,args…]` / `Int`                                    |
+| `struct`/`obj`          | List(0..7) + values / Struct + group / StructOpen + groups + Close |
+| `string`/`str`          | String + size + bytes as UTF-8                               |
+| `bytes`/`data`          | Data + size + raw bytes                                      |
+| `decimal`/`dec`         | Int as signed ("ZigZag") `<< 3` + 0..9 places (see below)    |
+| `uint`                  | Int                                                          |
+| `int`                   | Int signed ("ZigZag")                                        |
+| `ratio`                 | `list[int,uint]` where the denominator must not be zero      |
+| `percent`/`pct`         | `decimal` rebased to 1 (i.e. 50% is 0.5)                     |
+| `float16,32,64,128,256` | Float 16 / 32 / 64 / 128 / 256                               |
+| `mask`                  | `list` of a mix of `uint` and `list` (recursive)             |
+| `date`/`_on`            | `uint` (see below)                                           |
+| `datetime`/`time`       | `uint` (see below)                                           |
+| `timestamp`/`_ts`       | `int` seconds since UNIX Epoch `- 1,750,750,750`             |
+| `timespan`/`span`       | `uint` (see below)                                           |
+| `id`/`guid`/`uuid`      | `uint` or `string` depending on source type                  |
+| `code`                  | `string` strictly `[A-Z0-9_]` (i.e. "USD")                   |
+| `language`/`lang`       | `code` IETF BCP-47                                           |
+| `country`/`cntry`       | `code` ISO 3166-1 alpha-2                                    |
+| `region`/`rgn`          | `code` ISO 3166-2 alpha-1/3 (without country prefix)         |
+| `currency`/`curr`       | `code` ISO 4217 alpha-3                                      |
+| `tax_code`              | `code` "CC[_RRR]_X": ISO 3166-1, ISO 3166-2, acronym         |
+| `unit`                  | `code` UN/CEFACT Recommendation 20 unit of measure           |
+| `text`                  | `map` of `lang,string` pairs / `string` for just one in a clear context  |
+| `amount`/`price`/`amt`  | `list[decimal,currency]` / `decimal`                         |
+| `tax`/`tax_amt`         | `list[decimal,tax_code,currency]` / `list[decimal,tax_code]` |
+| `quantity`/`qty`        | `list[decimal,unit]` / `decimal`                             |
+| `ip`                    | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                    |
+| `subnet`/`cidr`/`net`   | `list[ip,uint]` CIDR notation: IP with netmask size in bits  |
 
 ### Map
 
