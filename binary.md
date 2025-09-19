@@ -4,7 +4,7 @@
 
 A Vanilla Object Format chunk is a stream of values, each sometimes followed by data as specified by the value itself.
 
-Optionally, writers may prefix their output with Tag 649920 applied to Int 102, which encodes to `0xFFC0564F66` (the last 3 bytes spelling ASCII "VOf").  This tag-value combination is reserved as a format magic number when used at position zero, to be discarded by readers.  This prefix should be used whenever VOF is used to store permanent data, such as in files or databases and may be omitted for ephemeral transactions.
+Optionally, writers may prefix their output with Tag 5505 applied to Int 79, which encodes to `0xFF81564F` (the last 2 bytes spelling ASCII "VO").  This tag-value combination is reserved as a format magic number when used at position zero, to be discarded by readers.  This prefix should be used whenever VOF is used to store permanent data, such as in files or databases and may be omitted for ephemeral transactions.
 
 The suggested MIME type for binary encoded transfers is `application/x-vanilla-object` while JSON remains `application/json`.
 
@@ -18,36 +18,41 @@ Decoders encountering impossible input (including invalid UTF-8 in `string` data
 
 Small integers are compressed at the slight expense of larger ones similarly to the Prefix Varint format (itself a variation on LEB128 and VLQ which eliminates loops, most shifts and represents 64 bits in 9 bytes instead of 10).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Illustrated here from the decoder point of view, we see that very little computing is involved:
 
-| Byte (`c`) | Type                       | Condition | Description / Operation                                   |
-| ---------- | -------------------------- | --------- | --------------------------------------------------------- |
-| `0_______` | Int 7-bit                  | `< 128`   | `c`                                                       |
-| `10______` | Int 14-bit                 | `< 192`   | `(next_byte() << 6) + c - 128`                            |
-| `110_____` | Int 21-bit                 | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                       |
-| `111000__` | Int 26-bit                 | `< 228`   | `(next_bytes_le(3) << 2) + c - 224`                       |
-|            | Int 32,40,48,56,64,128,256 | `< 235`   | Next 4,5,6,7,8,16,32 bytes are int Little Endian          |
-|            | Float 16,32,64,128,256     | `< 240`   | Next 2,4,8,16,32 bytes are IEEE 754 Little Endian         |
-|            | List                       | `== 240`  | Open (items until End)                                    |
-|            | List                       | `== 241`  | Close nearest `List Open`                                 |
-|            | List                       | `< 251`   | Exactly 0..8 items                                        |
-|            | Struct                     | `== 251`  | Open (groups until Close, defined below)                  |
-|            | Struct                     | `== 252`  | Open single group, no Close necessary                     |
-|            | Data                       | `== 253`  | Next value is size in bytes, then as many bytes follow    |
-|            | Null                       | `== 254`  |                                                           |
-|            | Tag                        |           | Next value is Int qualifier, then qualified value         |
+| Byte (`c`) | Type               | Condition | Description / Operation                                  |
+| ---------- | ------------------ | --------- | -------------------------------------------------------- |
+| `0_______` | Int 7-bit          | `< 128`   | `c`                                                      |
+| `10______` | Int 14-bit         | `< 192`   | `(next_byte() << 6) + c - 128`                           |
+| `110_____` | Int 21-bit         | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`                      |
+| `111000__` | Int 26-bit         | `< 228`   | `(next_bytes_le(3) << 2) + c - 224`                      |
+|            | Int 32,40,48,56,64 | `< 233`   | Next 4,5,6,7,8 bytes are int Little Endian               |
+|            | Float 16,32,64     | `< 236`   | Next 2,4,8 bytes are IEEE 754 Little Endian              |
+|            |                    | `== 236`  | Boolean False                                            |
+|            |                    | `== 237`  | Boolean True                                             |
+|            | Data               | `== 238`  | Next is size in bytes, then raw bytes                    |
+|            | String             | `== 239`  | Next is size in bytes, then UTF-8 bytes                  |
+|            | Int 128,256,...    | `== 240`  | Next is size in bytes, then integer Little Endian bytes  |
+|            | Float 128,256,...  | `== 241`  | Next is size in bytes, then IEEE 754 Little Endian bytes |
+|            | List               | `== 242`  | Open (items until End)                                   |
+|            | List               | `== 243`  | Close nearest `List Open`                                |
+|            | List               | `< 252`   | Exactly 0..7 items                                       |
+|            | Struct             | `== 252`  | Open (groups until Close, defined below)                 |
+|            | Struct             | `== 253`  | Open single group, no Close necessary                    |
+|            | Null               | `== 254`  |                                                          |
+|            | Tag                |           | Next value is Int qualifier, then qualified value        |
 
 ### Canonical Encoding
 
 * Integers must be encoded in the smallest form possible.  Note that 128 and 256 bit integer support is not expected under normal circumstances and should only be used when readers are expected to support them.
 
-* Lists of 0..8 items must be encoded with the short forms 242..250.  Thus maps of 0..4 pairs must be encoded as 242, 244, 246, 248, 250.  Open lists and maps have no maximum length.
+* Lists of 0..7 items must be encoded with the short forms 244..251.  Thus maps of 0..3 pairs must be encoded as 244, 246, 248, 250.  Open lists and maps have no maximum length.
 
 * Lists used as key-value sequences (odd keys, even values) should be sorted by ascending key when buffering the whole list is possible, to facilitate higher-level compression.
 
-* Structs without content must be encoded as an empty List (242).
+* Structs without content must be encoded as an empty List (244).
 
 * Structs with contiguous fields starting from 0 must be encoded as a List.
 
-* Structs with a single group (largest field ID < 8) must be encoded with the shortcut (252).
+* Structs with a single group (largest field ID < 8) must be encoded with the shortcut (253).
 
 * Floating point numbers must be represented in the smallest form which does not lose precision.  Note that `-0.0` and `+0.0` are _not_ considered equivalent, however all `NaN` bit patterns are considered equal.  When converting between precisions, denormalized numbers should be normalized if the target precision can represent the exact value as a normal number.  This ensures minimal representation while maintaining precision.  Note that 128 and 256 bit floating point support is not expected under normal circumstances and should only be used when readers are expected to support them.
 
@@ -83,13 +88,13 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | Name                   | Wire Encoding                                                |
 | ---------------------- | ------------------------------------------------------------ |
 | `null`                 | Null                                                         |
-| `bool`                 | Int values `0` and `1`                                       |
-| `list`/`…s`            | List(0..8) + 0..8 vals / List Open + vals + Close            |
+| `bool`                 | Boolean True / Boolean False                                 |
+| `list`/`…s`            | List(0..7) + 0..7 vals / List Open + vals + Close            |
 | `map`                  | `list` of alternating keys and values                        |
 | `variant`/`enum`       | `list[Int,args…]` / `Int`                                    |
-| `struct`/`obj`         | List(0..8) + values / Struct(0..8) + groups / Struct + groups + Close |
-| `string`/`str`         | Data (empty) / Data + size + bytes as UTF-8                  |
-| `bytes`/`data`         | Same as `string` but without implied UTF-8                   |
+| `struct`/`obj`         | List(0..7) + values / Struct + group / StructOpen + groups + Close |
+| `string`/`str`         | String + size + bytes as UTF-8                               |
+| `bytes`/`data`         | Data + size + raw bytes                                      |
 | `decimal`/`dec`        | Int as signed ("ZigZag") `<< 4` + 0..15 decimal places       |
 | `uint`                 | Int                                                          |
 | `int`                  | Int signed ("ZigZag")                                        |
@@ -101,9 +106,10 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | `float128`/`f128`      | Float 128                                                    |
 | `float256`/`f256`      | Float 256                                                    |
 | `mask`                 | `list` of a mix of `uint` and `list` (recursive)             |
-| `datetime`/`date`/`dt` | `uint` (see Datetime)                                        |
-| `timespan`/`span`      | `uint` (see Timespan)                                        |
-| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1,750,750,750`             |
+| `date`/`_on`           | `uint` (see below)                                           |
+| `datetime`/`time`      | `uint` (see below)                                           |
+| `timestamp`/`_ts`      | `int` seconds since UNIX Epoch `- 1,750,750,750`             |
+| `timespan`/`span`      | `uint` (see below)                                           |
 | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                  |
 | `code`                 | `string` strictly uppercase alphanumeric ASCII (i.e. "USD")  |
 | `language`/`lang`      | `code` IETF BCP-47                                           |
@@ -127,9 +133,16 @@ A signed ("ZigZag") integer left-shifted 4 bits followed by an unsigned nibble r
 
 The canonical encoding is the smallest representation possible.  For example, 1.1 should be represented as "11 with 1 decimal place", not as "110 with 2 decimal places" and such.
 
+### Date
+
+Calendar date, sortable.  Time zone is outside the scope of this type, derived from context as necessary.  Structured in 17 bits as `(year << 9) + (month << 5) + day` where:
+* **year** — Number of years since 1900 (i.e. 2025 is 125)
+* **month** — 1..12
+* **day** — 1..31
+
 ### Datetime
 
-Calendar and wall clock time, sortable.  Time zone is outside the scope of this type, derived from context as necessary.  Structured with minute precision in 28 bits as `(year << 20) + (month << 16) + (day << 11) + (hour << 6) + minute` where:
+Extends `Date` with wall clock time, still sortable and with implicit time zone.  Structured with minute precision in 28 bits as `(year << 20) + (month << 16) + (day << 11) + (hour << 6) + minute` where:
 * **year** — Number of years since 1900 (i.e. 2025 is 125)
 * **month** — 1..12
 * **day** — 1..31

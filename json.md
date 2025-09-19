@@ -25,8 +25,9 @@ The following high-level types are standard (to be preferred to alternatives) bu
 | `float128`/`f128`      | `bytes` IEEE 754 binary128 Little Endian                                 |
 | `float256`/`f256`      | `bytes` IEEE 754 binary256 Little Endian                                 |
 | `mask`                 | `list` of a mix of `string` and `list` (see below)                       |
-| `datetime`/`date`/`dt` | String: `YYYY-MM-DD HH:MM` (see below)                                   |
-| `timestamp`/`ts`       | `int` seconds since UNIX Epoch `- 1,750,750,750`                         |
+| `date`/`_on`           | `uint` as YYYYMMDD (see below)                                           |
+| `datetime`/`time`      | `uint` as YYYYMMDDHHMM (see below)                                       |
+| `timestamp`/`ts`/`_at` | `int` seconds since UNIX Epoch `- 1,750,750,750`                         |
 | `timespan`/`span`      | `list` of three `int` (see below)                                        |
 | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                              |
 | `code`                 | `string` strictly uppercase alphanumeric ASCII (i.e. "USD")              |
@@ -51,7 +52,7 @@ The following high-level types are standard (to be preferred to alternatives) bu
 
 ## Additional Notes on Types
 
-### Datetime
+### Date, Datetime
 
 Calendar and wall clock time.  Time zone is outside the scope of this type, derived from context as necessary.
 
