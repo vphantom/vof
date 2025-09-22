@@ -30,7 +30,7 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 |            | String             | `== 236`  | Next is size in bytes, then UTF-8 bytes                  |
 |            | Struct Open        | `== 237`  | Open (groups until Close, defined below)                 |
 |            | List Open          | `== 238`  | Values until `List Close`                                |
-|            | List Close         | `== 239`  | Close nearest `List Open`                                |
+|            | Close              | `== 239`  | Close nearest `List Open` or `Series`                    |
 |            | List               | `< 249`   | Exactly 0..8 items                                       |
 |            | Data               | `== 249`  | Next is size in bytes, then raw bytes                    |
 |            | Array              | `== 250`  | Next: dimcount, dims..., values... (see below)           |
@@ -81,7 +81,7 @@ Note that field numbers and names should remain reserved forever when they are d
 
 ### Series
 
-List of Struct where all the same fields are defined (typical in time series data, product price lists, etc.)  Following the control character is an `Int` specifying how many header control bytes there are, followed by as many such bytes as specified.  Each value of each Struct is then added.
+List of `Struct` where all the same fields are defined (typical in time series data, product price lists, etc.)  Following the control character is an `Int` specifying how many header control bytes there are, followed by as many such bytes as specified.  Each value of each `Struct` is then added, so this means the same value count for each instance.  The series is concluded with `Close`.
 
 For example, a list of 3 objects each with fields 0,1,2 could be: 251, 1, 135, 3, 1, 1, 1, 2, 2, 2, 3, 3, 3
 
@@ -98,7 +98,7 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | 68   | `map`                  | `list` of alternating keys and values                        |
 | 69   | `variant`/`enum`       | `list[Int,args…]` / `Int`                                    |
 | 70   | `struct`/`obj`         | Struct Open + groups + Struct Close                          |
-| 71   | `series`               | Series + headcount + headers... + count + values...          |
+| 71   | `series`               | Series + headcount + headers... + values... + Close          |
 | 72   | `collection`/`heap`    | `map` of `enum` keys to `list[struct,...]` or `series`       |
 | 73   | `string`/`str`         | String + size + bytes as UTF-8                               |
 | 74   | `bytes`/`data`         | Data + size + raw bytes                                      |
