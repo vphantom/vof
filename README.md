@@ -34,7 +34,7 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 ### Specification Status
 
-Release Candidate 5 - 2025-09-22
+Release Candidate 6 - 2025-09-22
 
 An IDL is coming to help structure implementations and share schemas.
 

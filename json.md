@@ -9,10 +9,12 @@ The following high-level types are standard (to be preferred to alternatives) bu
 | `null`                 | Null                                                                     |
 | `bool`                 | Boolean                                                                  |
 | `list`/`…s`            | Array                                                                    |
+| `array`                | Array                                                                    |
 | `map`                  | Object                                                                   |
 | `variant`/`enum`       | Array[`string`,args…] / `string` with first or all letters uppercased    |
 | `struct`/`obj`         | Object with field name keys                                              |
-| `collection`/`heap`    | `map` of `enum` keys to `map` of ID keys to `struct`                     |
+| `series`               | Array[`struct`,...]                                                      |
+| `collection`/`heap`    | `map` of `enum` keys to `list[struct,...]` or `series` (same in JSON)    |
 | `string`/`str`         | String (necessarily UTF-8)                                               |
 | `bytes`/`data`         | String Base64-URL                                                        |
 | `decimal`/`dec`        | String: optional `-`, then 1+ digits, then possibly `.` and 1+ digits    |
@@ -54,7 +56,7 @@ The following high-level types are standard (to be preferred to alternatives) bu
 
 ### Collection
 
-Standard pattern for grouping related objects by type and then ID, eliminating redundancy.  Facilitates the use of normalizing references by ID.  The root map's `enum` is application-defined to represent object classes ("User", "Order", etc.).  The contained maps are keyed by whatever ID type each object class uses.  Combined with our canonical encoding, this helps payloads be as small and easy to compress as possible.
+Standard pattern for grouping related objects by type, eliminating redundancy.  Facilitates the use of normalizing references by ID.  The root map's `enum` is application-defined to represent object classes ("User", "Order", etc.).  The contained lists of objects should include ID fields.  Combined with our canonical encoding, this helps payloads be as small and easy to compress as possible.
 
 For example, instead of embedding related users and products in an order object into a tree where some products may be duplicated, create a collection where each item (users, products, orders) is present exactly once and refer to each other by ID.
 

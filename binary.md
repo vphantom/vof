@@ -33,6 +33,8 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 |            | List Close         | `== 239`  | Close nearest `List Open`                                |
 |            | List               | `< 249`   | Exactly 0..8 items                                       |
 |            | Data               | `== 249`  | Next is size in bytes, then raw bytes                    |
+|            | Array              | `== 250`  | Next: dimcount, dims..., values... (see below)           |
+|            | Series             | `== 251`  | Next: headcount, heads..., count, values... (see below)  |
 |            | Reserved           | `< 255`   | Next is size in bytes, then raw bytes                    |
 |            | Tag                |           | Next value is Int qualifier, then qualified value        |
 
@@ -49,6 +51,12 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 ### Implicit List
 
 A chunk is always considered a list without the need for an initial `List Open` nor a final `Close`.  Therefore, a 7-bit ASCII file is a valid list of small integers.
+
+### Array
+
+Fixed-size multi-dimensional lists.  Following the control character is an `Int` specifying how many dimensions there are, followed by as many `Int` as specified.  Each value is then added from zero-index onwards, as many values as the product of all dimensions.
+
+For example, a 3D array of 2x2x2 could be: 250, 3, 2, 2, 2, 1, 2, 3, 4, 5, 6, 7, 8
 
 ### Int Optionally Signed
 
@@ -71,6 +79,12 @@ Example control bytes:
 
 Note that field numbers and names should remain reserved forever when they are deprecated to avoid version conflicts in your schemas.
 
+### Series
+
+List of Struct where all the same fields are defined (typical in time series data, product price lists, etc.)  Following the control character is an `Int` specifying how many header control bytes there are, followed by as many such bytes as specified.  Each value of each Struct is then added.
+
+For example, a list of 3 objects each with fields 0,1,2 could be: 251, 1, 135, 3, 1, 1, 1, 2, 2, 2, 3, 3, 3
+
 ## DATA TYPES
 
 These higher-level types are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.  Encoders _may_ elect to tag values in situations where the encoded data must be decoded without a schema, but it is not the primary goal of this format.  (Our JSON encoding is much more self-describing in that regard.)
@@ -80,43 +94,45 @@ These higher-level types are standard (to be preferred to alternatives) but opti
 | 64   | `null`                 | Null                                                         |
 | 65   | `bool`                 | False: Int 0 / True: Int 1                                   |
 | 66   | `list`/`…s`            | List(0..10) + 0..10 vals / List Open + vals + Close          |
-| 67   | `map`                  | `list` of alternating keys and values                        |
-| 68   | `variant`/`enum`       | `list[Int,args…]` / `Int`                                    |
-| 69   | `struct`/`obj`         | Struct Open + groups + Struct Close                          |
-| 70   | `collection`/`heap`    | `map` of `enum` keys to `map` of ID keys to `struct`         |
-| 71   | `string`/`str`         | String + size + bytes as UTF-8                               |
-| 72   | `bytes`/`data`         | Data + size + raw bytes                                      |
-| 73   | `decimal`/`dec`        | Int as signed ("ZigZag") `<< 3` + 0..9 places (see below)    |
-| 74   | `uint`                 | Int                                                          |
-| 75   | `int`                  | Int signed ("ZigZag")                                        |
-| 76   | `ratio`                | `list[int,uint]` where the denominator must not be zero      |
-| 77   | `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                     |
-| 78   | `float32`              | Float 32                                                     |
-| 79   | `float64`              | Float 64                                                     |
-| 80   | `mask`                 | `list` of a mix of `uint` and `list` (recursive)             |
-| 81   | `date`/`_on`           | `uint` (see below)                                           |
-| 82   | `datetime`/`time`      | `uint` (see below)                                           |
-| 83   | `timestamp`/`_ts`      | `int` seconds since UNIX Epoch `- 1,750,750,750`             |
-| 84   | `timespan`/`span`      | `list` of three `int` (see below)                            |
-| 85   | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                  |
-| 86   | `code`                 | `string` strictly `[A-Z0-9_]` (i.e. "USD")                   |
-| 87   | `language`/`lang`      | `code` IETF BCP-47                                           |
-| 88   | `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                    |
-| 89   | `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (without country prefix)         |
-| 90   | `currency`/`curr`      | `code` ISO 4217 alpha-3                                      |
-| 91   | `tax_code`             | `code` "CC[_RRR]_X": ISO 3166-1, ISO 3166-2, acronym         |
-| 92   | `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure           |
-| 93   | `text`                 | `map` of `lang,string` pairs / `string` for just one in a clear context |
-| 94   | `amount`/`price`/`amt` | `list[decimal,currency]` / `decimal`                         |
-| 95   | `tax`/`tax_amt`        | `list[decimal,tax_code,currency]` / `list[decimal,tax_code]` |
-| 96   | `quantity`/`qty`       | `list[decimal,unit]` / `decimal`                             |
-| 97   | `ip`                   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                    |
-| 98   | `subnet`/`cidr`/`net`  | `list[ip,uint]` CIDR notation: IP with netmask size in bits  |
-| 99   | `coords`/`latlong`     | `list[decimal,decimal]` as WGS84 coordinates                 |
+| 67   | `array`                | Array + dimcount + dim sizes... + values...                  |
+| 68   | `map`                  | `list` of alternating keys and values                        |
+| 69   | `variant`/`enum`       | `list[Int,args…]` / `Int`                                    |
+| 70   | `struct`/`obj`         | Struct Open + groups + Struct Close                          |
+| 71   | `series`               | Series + headcount + headers... + count + values...          |
+| 72   | `collection`/`heap`    | `map` of `enum` keys to `list[struct,...]` or `series`       |
+| 73   | `string`/`str`         | String + size + bytes as UTF-8                               |
+| 74   | `bytes`/`data`         | Data + size + raw bytes                                      |
+| 75   | `decimal`/`dec`        | Int as signed ("ZigZag") `<< 3` + 0..9 places (see below)    |
+| 76   | `uint`                 | Int                                                          |
+| 77   | `int`                  | Int signed ("ZigZag")                                        |
+| 78   | `ratio`                | `list[int,uint]` where the denominator must not be zero      |
+| 79   | `percent`/`pct`        | `decimal` rebased to 1 (i.e. 50% is 0.5)                     |
+| 80   | `float32`              | Float 32                                                     |
+| 81   | `float64`              | Float 64                                                     |
+| 82   | `mask`                 | `list` of a mix of `uint` and `list` (recursive)             |
+| 83   | `date`/`_on`           | `uint` (see below)                                           |
+| 84   | `datetime`/`time`      | `uint` (see below)                                           |
+| 85   | `timestamp`/`_ts`      | `int` seconds since UNIX Epoch `- 1,750,750,750`             |
+| 86   | `timespan`/`span`      | `list` of three `int` (see below)                            |
+| 87   | `id`/`guid`/`uuid`     | `uint` or `string` depending on source type                  |
+| 88   | `code`                 | `string` strictly `[A-Z0-9_]` (i.e. "USD")                   |
+| 89   | `language`/`lang`      | `code` IETF BCP-47                                           |
+| 90   | `country`/`cntry`      | `code` ISO 3166-1 alpha-2                                    |
+| 91   | `region`/`rgn`         | `code` ISO 3166-2 alpha-1/3 (without country prefix)         |
+| 92   | `currency`/`curr`      | `code` ISO 4217 alpha-3                                      |
+| 93   | `tax_code`             | `code` "CC[_RRR]_X": ISO 3166-1, ISO 3166-2, acronym         |
+| 94   | `unit`                 | `code` UN/CEFACT Recommendation 20 unit of measure           |
+| 95   | `text`                 | `map` of `lang,string` pairs / `string` for just one in a clear context |
+| 96   | `amount`/`price`/`amt` | `list[decimal,currency]` / `decimal`                         |
+| 97   | `tax`/`tax_amt`        | `list[decimal,tax_code,currency]` / `list[decimal,tax_code]` |
+| 98   | `quantity`/`qty`       | `list[decimal,unit]` / `decimal`                             |
+| 99   | `ip`                   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                    |
+| 100  | `subnet`/`cidr`/`net`  | `list[ip,uint]` CIDR notation: IP with netmask size in bits  |
+| 101  | `coords`/`latlong`     | `list[decimal,decimal]` as WGS84 coordinates                 |
 
 ### Collection
 
-Standard pattern for grouping related objects by type and then ID, eliminating redundancy.  Facilitates the use of normalizing references by ID.  The root map's `enum` is application-defined to represent object classes ("User", "Order", etc.).  The contained maps are keyed by whatever ID type each object class uses.  Combined with our canonical encoding, this helps payloads be as small and easy to compress as possible.
+Standard pattern for grouping related objects by type, eliminating redundancy.  Facilitates the use of normalizing references by ID.  The root map's `enum` is application-defined to represent object classes ("User", "Order", etc.).  The contained lists of objects should include ID fields.  Combined with our canonical encoding, this helps payloads be as small and easy to compress as possible.
 
 For example, instead of embedding related users and products in an order object into a tree where some products may be duplicated, create a collection where each item (users, products, orders) is present exactly once and refer to each other by ID.
 
@@ -164,11 +180,15 @@ Tags 0..63 are available for applications to define their own types from our bas
 
 ### Reserved Types
 
-The 5 reserved control values are predetermined to use the same structure as `Data`: an unsigned number of bytes follows, and then as many bytes as specified.  This makes room for future types such as large integers or floats while guaranteeing that older decoders can safely skip over such unknown value types.
+The 3 reserved control values are predetermined to use the same structure as `Data`: an unsigned number of bytes follows, and then as many bytes as specified.  This makes room for future types such as large integers or floats while guaranteeing that older decoders can safely skip over such unknown value types.
 
 ### Maps
 
 Decoders should use the last value when a key is present multiple times.
+
+### Series
+
+Encoders should use the first object of the list to determine the structure.  They should fail if a subsequent member has extra fields set.  If subsequent members are missing any fields though, encoders may encode Null instead of failing if they want to be permissive.
 
 ### Strings
 
