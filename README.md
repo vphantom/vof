@@ -36,22 +36,17 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 Release Candidate 6 - 2025-09-22
 
-An IDL is coming to help structure implementations and share schemas.
+Still missing: optional JSON IDL to help share schemas, documentation overhaul to unify the high-level types into a single table.  Possibly merge binary and JSON documents to remove duplicate sections.
 
 ## ROADMAP
 
 ### Internal Use Release
 
-- [x] Deprecate `code` type, downgrade use cases to uppercase strings.
-- [x] Refactor `datetime` type into a bit field.
-- [x] Merge `enum` into `variant` type.
-- [x] New `timespan` bit field.
-- [ ] Introduce JSON IDL.
-- [x] Confirm float choice
-- [x] Finalize specification
-- [ ] Perl 5
-- [ ] Test round-trips to try to catch fatal design issues
+- [ ] Introduce JSON IDL
 - [ ] OCaml
+- [ ] Test round-trips to try to catch fatal design issues
+- [ ] Perl 5
+- [ ] Python
 
 ### First Public Release
 
@@ -61,7 +56,6 @@ Before officially accepting contributions, I'd like to cover a few more implemen
 - [ ] Create a `CONTRIBUTING.md`
 - [ ] Have the docs proofread for clarity
 - [ ] JavaScript / TypeScript
-- [ ] Python
 - [ ] C / C++
 
 ### Future Improvements
