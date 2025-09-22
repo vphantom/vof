@@ -13,6 +13,8 @@ Really, yet another serialization format?  Yes, but one of the simplest!  This f
 * Compact struct type (unlike CBOR)
 * Easy versioning with numbered struct fields (like Protobuf)
 * Convention for higher-level types (decimal, datetime, etc.)
+* Optional explicit typing on the wire (like CBOR)
+* JSON encoding fairly self-describing (i.e. "50%", "3/4", unlike Protobuf)
 * Application-facing references (de-duplication on the wire and in memory)
 * Schema-based (writers and readers agree on types out-of-band)
 * Enough explicit type information for inspection of unknown data
@@ -32,7 +34,7 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 ### Specification Status
 
-Release Candidate 4 - 2025-09-19
+Release Candidate 5 - 2025-09-22
 
 An IDL is coming to help structure implementations and share schemas.
 
