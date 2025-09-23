@@ -4,7 +4,7 @@
 
 <!-- [![GitHub release](https://img.shields.io/github/release/vphantom/vof.svg?style=plastic)]() -->
 
-Really, yet another serialization format?  Yes, but one of the simplest!  This fills a niche use case of ours somewhere between JSON, CBOR and Protocol Buffers with the following goals:
+Really, yet another serialization format?  Yes, but one of the simplest yet most compact!  This fills a niche use case of ours somewhere between JSON, CBOR and Protocol Buffers with the following goals:
 
 * Easy to implement in a new language (weekend project)
 * Low CPU/memory requirements to encode and especially decode
