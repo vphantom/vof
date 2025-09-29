@@ -20,13 +20,13 @@ Namespaces are delimited with period '.' characters.
 
 	// Foo is a struct with nested types and regular fields
 	Foo: {
-	
+
 		// Variant where cases have arguments
 		$Result: {
 			Ok: [1, "string"],
 			Error: [2, "string"],
 		},
-	
+
 		// Variant used as an enum
 		$Code: {
 			UNSPECIFIED: 0,
@@ -34,7 +34,7 @@ Namespaces are delimited with period '.' characters.
 			ERR: 3,
 			NOT_FOUND: 404,
 		},
-	
+
 		// Fields with their ID and type declarations
 		id: [0, "uint"],
 		name: [1, "string"],

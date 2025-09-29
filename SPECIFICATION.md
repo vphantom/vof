@@ -29,21 +29,20 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `datetime`/`time`      | 84   | `uint` (see below)                                           | `uint` as YYYYMMDDHHMM (see below)                           |
 | `timestamp`/`_ts`      | 85   | `int` seconds since UNIX Epoch `- 1,750,750,750`             | _same_                                                       |
 | `timespan`/`span`      | 86   | `list` of three `int` (see below)                            | _same_                                                       |
-| `id`/`guid`/`uuid`     | 87   | `uint` or `string` depending on source type                  | _same_                                                       |
-| `code`                 | 88   | `string` strictly `[A-Z0-9_]` (i.e. "USD")                   | _same_                                                       |
-| `language`/`lang`      | 89   | `code` IETF BCP-47                                           | _same_                                                       |
-| `country`/`cntry`      | 90   | `code` ISO 3166-1 alpha-2                                    | _same_                                                       |
-| `region`/`rgn`         | 91   | `code` ISO 3166-2 alpha-1/3 (without country prefix)         | _same_                                                       |
-| `currency`/`curr`      | 92   | `code` ISO 4217 alpha-3                                      | _same_                                                       |
-| `tax_code`             | 93   | `code` "CC[_RRR]_X": ISO 3166-1, ISO 3166-2, acronym         | _same_                                                       |
-| `unit`                 | 94   | `code` UN/CEFACT Recommendation 20 unit of measure           | _same_                                                       |
-| `text`                 | 95   | `map` of `lang,string` pairs / `string` for just one         | _same_                                                       |
-| `amount`/`price`/`amt` | 96   | `list[decimal,currency]` / `decimal`                         | String: `decimal` + optional space and `currency` (i.e. "1.23 CAD") |
-| `tax`/`tax_amt`        | 97   | `list[decimal,tax_code,currency]` / `list[decimal,tax_code]` | String: `decimal` + optional space and `currency` + mandatory space + `tax_code` |
-| `quantity`/`qty`       | 98   | `list[decimal,unit]` / `decimal`                             | String: `decimal` + optional space and `unit` (i.e. "1.23 GRM") |
-| `ip`                   | 99   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                    | String: IPv4 or IPv6 notation                                |
-| `subnet`/`cidr`/`net`  | 100  | `list[ip,uint]` CIDR notation: IP with netmask bit size      | String: CIDR notation                                        |
-| `coords`/`latlong`     | 101  | `list[decimal,decimal]` as WGS84 coordinates                 | _same_                                                       |
+| `code`                 | 87   | `string` strictly `[A-Z0-9_]` (i.e. "USD")                   | _same_                                                       |
+| `language`/`lang`      | 88   | `code` IETF BCP-47                                           | _same_                                                       |
+| `country`/`cntry`      | 89   | `code` ISO 3166-1 alpha-2                                    | _same_                                                       |
+| `region`/`rgn`         | 90   | `code` ISO 3166-2 alpha-1/3 (without country prefix)         | _same_                                                       |
+| `currency`/`curr`      | 91   | `code` ISO 4217 alpha-3                                      | _same_                                                       |
+| `tax_code`             | 92   | `code` "CC[_RRR]_X": ISO 3166-1, ISO 3166-2, acronym         | _same_                                                       |
+| `unit`                 | 93   | `code` UN/CEFACT Recommendation 20 unit of measure           | _same_                                                       |
+| `text`                 | 94   | `map` of `lang,string` pairs / `string` for just one         | _same_                                                       |
+| `amount`/`price`/`amt` | 95   | `list[decimal,currency]` / `decimal`                         | String: `decimal` + optional space and `currency` (i.e. "1.23 CAD") |
+| `tax`/`tax_amt`        | 96   | `list[decimal,tax_code,currency]` / `list[decimal,tax_code]` | String: `decimal` + optional space and `currency` + mandatory space + `tax_code` |
+| `quantity`/`qty`       | 97   | `list[decimal,unit]` / `decimal`                             | String: `decimal` + optional space and `unit` (i.e. "1.23 GRM") |
+| `ip`                   | 98   | `bytes` with 4 or 16 bytes (IPv4 or IPv6)                    | String: IPv4 or IPv6 notation                                |
+| `subnet`/`cidr`/`net`  | 99   | `list[ip,uint]` CIDR notation: IP with netmask bit size      | String: CIDR notation                                        |
+| `coords`/`latlong`     | 100  | `list[decimal,decimal]` as WGS84 coordinates                 | _same_                                                       |
 
 ### Variant / Enum
 
