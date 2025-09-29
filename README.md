@@ -43,6 +43,7 @@ Still missing: optional JSON IDL to help share schemas, documentation overhaul t
 ### Internal Use Release
 
 - [ ] Introduce JSON IDL
+- [ ] Introduce PATCH format (struct where list expected) for parity with our JSON API
 - [ ] OCaml
 - [ ] Test round-trips to try to catch fatal design issues
 - [ ] Perl 5
