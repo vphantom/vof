@@ -43,3 +43,34 @@ Namespaces are delimited with period '.' characters.
 	},
 }
 ```
+
+FIXME: Nope, let's just use variants:
+
+```json5
+{
+    vof: 1,
+    package: "org.example.foo",
+    Foo: [ "struct", {
+        Result: [ "variant", {
+            Ok: [1, "string"],
+            ...
+        }],
+        id: [0, "uint"],
+        name: [1, "string"],
+        ...
+    }],
+}
+```
+
+Note that this is STILL not expressible in the IDL itself because the values vary.  Let's see...
+
+    | struct of fields_obj
+    | variant of fields_obj
+    | uint of uint
+    | string of uint
+    | map of 'self, 'self, uint
+
+I guess the first argument would need to be a type, so that it can be our main type variant itself.  (struct, variant, string, uint, etc. including the name of a custom struct/variant as well though! that's dynamic!)
+
+and the map "selves" are without a field ID number obviously...
+

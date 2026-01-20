@@ -15,10 +15,11 @@ Really, yet another serialization format?  Yes, but one of the simplest yet most
 * Convention for higher-level types (decimal, datetime, etc.)
 * Optional explicit typing on the wire (like CBOR)
 * JSON encoding fairly self-describing (i.e. "50%", "3/4", unlike Protobuf)
+* CBOR encoding with most of VOF Binary's advantages while using off-the-shelf libraries
 * Application-facing references (de-duplication on the wire and in memory)
 * Schema-based (writers and readers agree on types out-of-band)
 * Enough explicit type information for inspection of unknown data
-* Explicit binary-JSON interoperability (like Protobuf)
+* Explicit binary-CBOR-JSON interoperability (like Protobuf)
 
 The name "vanilla" was chosen to symbolize the aim to keep the format as simple and generic as possible.
 
@@ -34,45 +35,20 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 ### Specification Status
 
-Release Candidate 6 - 2025-09-22
-
-Still missing: optional JSON IDL to help share schemas, documentation overhaul to unify the high-level types into a single table.  Possibly merge binary and JSON documents to remove duplicate sections.
+Release Candidate 7 - 2026-01-19
 
 ## ROADMAP
 
-### Internal Use Release
-
-- [ ] Introduce JSON IDL
 - [ ] Introduce PATCH format (struct where list expected) for parity with our JSON API
-- [ ] OCaml
 - [ ] Test round-trips to try to catch fatal design issues
-- [ ] Perl 5
-- [ ] Python
-
-### First Public Release
-
-Before officially accepting contributions, I'd like to cover a few more implementations to make sure we are good to go.
-
 - [ ] Create data files to help test all implementations
 - [ ] Create a `CONTRIBUTING.md`
 - [ ] Have the docs proofread for clarity
-- [ ] JavaScript / TypeScript
-- [ ] C / C++
-
-### Future Improvements
-
-- [ ] Java / Kotlin
-- [ ] C# / F#
-- [ ] Go
-- [ ] PHP
-- [ ] Rust
-- [ ] Ruby
-- [ ] Swift
 
 ## SPECIFICATIONS
 
-* [Binary Encoding](binary.md)
-* [JSON Encoding](json.md)
+* [Data Types](SPECIFICATION.md)
+* [VOF Binary Encoding](BINARY.md)
 
 ## ACKNOWLEDGEMENTS
 
@@ -80,7 +56,7 @@ Graph X Design Inc. https://www.gxd.ca/ sponsored part of this project.
 
 ## LICENSE AND COPYRIGHT
 
-Copyright (c) 2023-2025 Stéphane Lavergne <https://github.com/vphantom>
+Copyright (c) 2023-2026 Stéphane Lavergne <https://github.com/vphantom>
 
 Distributed under the MIT (X11) License:
 http://www.opensource.org/licenses/mit-license.php
