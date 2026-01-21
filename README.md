@@ -35,11 +35,12 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 ### Specification Status
 
-Release Candidate 7 - 2026-01-19
+Release Candidate 7 - 2026-01-21
 
 ## ROADMAP
 
 - [ ] Introduce PATCH format (struct where list expected) for parity with our JSON API
+- [ ] Struct: null vs absent, for PATCH operations, equating them may be undesirable
 - [ ] Test round-trips to try to catch fatal design issues
 - [ ] Create data files to help test all implementations
 - [ ] Create a `CONTRIBUTING.md`

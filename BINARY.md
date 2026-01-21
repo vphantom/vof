@@ -6,7 +6,7 @@ Decoders encountering impossible input (including invalid UTF-8 in `string` data
 
 ## Control Values
 
-Small integers are compressed at the slight expense of larger ones similarly to the Prefix Varint format (itself a variation on LEB128 and VLQ which eliminates loops, most shifts and represents 64 bits in 9 bytes instead of 10).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Illustrated here from the decoder point of view, we see that very little computing is involved:
+Small integers are compressed at the slight expense of larger ones similarly to the Prefix Varint format (itself a variation on LEB128 and VLQ but eliminating loops, most shifts and representing 64 bits in 9 bytes instead of 10).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Illustrated here from the decoder point of view, we see that very little computing is involved:
 
 | Byte (`c`) | Type               | Condition | Description / Operation                           |
 | ---------- | ------------------ | --------- | ------------------------------------------------- |
@@ -20,23 +20,17 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 |            | String             | `== 236`  | Next is size in bytes, then as many UTF-8 bytes   |
 |            | Struct Open        | `== 237`  | Open (groups until Struct Close)                  |
 |            | List Open          | `== 238`  | Values until `List Close`                         |
-|            | Close              | `== 239`  | Close nearest `List Open` or `Series`             |
+|            | Close              | `== 239`  | Close nearest `List Open`                         |
 |            | List               | `< 249`   | Exactly 0..8 items (no Close)                     |
-|            | Series             | `== 249`  | Next: headcount, heads..., values...              |
-|            | Data               | `== 250`  | Next is size in bytes, then as many raw bytes     |
+|            | Data               | `== 249`  | Next is size in bytes, then as many raw bytes     |
 |            | _reserved_         | `< 255`   | Next is size in bytes, then as many raw bytes     |
 |            | Tag                |           | Next value is Int qualifier, then qualified value |
 
 ### Canonical Encoding
 
 * Integers and `decimal` must be encoded in the smallest form possible.  For example, 1.1 should only be "11 with 1 decimal place."
-
 * Floating point numbers must be represented in the smallest form which does not lose precision.  Note that `-0.0` and `+0.0` are _not_ considered equivalent, however all `NaN` bit patterns are considered equal.  When converting between precisions, denormalized numbers should be normalized if the target precision can represent the exact value as a normal number.  This ensures minimal representation while maintaining precision.
-
-* Lists used as maps (odd keys, even values) should be sorted by ascending key when buffering the whole list is possible, to facilitate compression.
-
-* Lists of 0..8 items must be encoded with the short forms 240..248.  Thus maps of 0..4 pairs must be encoded as 242, 244, 246, 248.
-
+* Lists of 0..8 items must be encoded with the short forms 240..248.
 * Tags should not be used unless strictly necessary.
 
 ### Negative Integers
@@ -45,24 +39,21 @@ When an integer is considered signed, its least significant bit before encoding 
 
 ### Struct
 
-Similar to Protobuf's messages, although our fields are numbered from 0.  Structs are groups of values, each structured as a field identification byte followed by as many values as the header byte specifies.  Fields must thus be encoded in ascending numeric order.
+Structs are groups of values, each structured as a field selector byte followed by as many values as that byte specifies.  Fields must thus not be duplicated and be encoded in ascending numeric order.  A regular list of alternating field IDs and values should be used for sparse cases where there are gaps of 64+ between fields to be encoded.  Field selector bytes are structured as:
 
-Within a struct (after a `Struct Open` control value), fields are organized into groups for efficiency. Each group begins with a header byte that indicates which fields are present:
+* **Most Significant Bit:** continuation indicator
+  * `0` — this is the last group
+  * `1` — more groups will follow after this group's values
+* **Next Bit:**
+  * `0` — Gap: the last 6 bits represent 0..63 fields to skip after the last field ID; a single value follows this
+  * `1` — Map: the last 6 bits represent the presence of the next 6 field IDs (relative to the last); as many values follow as the bitmap has 1 bits set.
 
-* Gap: under 128 is the number of fields to skip after the last field ID, which will be followed by a single value.
-* Struct Close: value 128 closes the nearest `Struct Open`.
-* Field Map: over 128, the least significant 7 bits form a bitmap indicating which of the next 7 next field IDs (relative to the last) are present, followed by as many values as the bitmap has 1 bits set.
+Example selector bytes:
 
-Example header bytes:
-* `00000010` (2) means skip 2 field IDs (i.e. if the last field ID was 3, we now encode ID 6)
-* `11100000` (224) means fields at positions +0, +1 are present, but +2 through +6 are absent
-* `10000001` (129) means fields at positions +0, +6 are present, but +1 through +5 are absent
+* `00000010` — last group, skip 2 field IDs (i.e. if the last field was 3, the next value is for ID 6)
 
-### Series
-
-Following the control value is an `Int` specifying how many struct header bytes there are, followed by as many header bytes as specified.  Each value of each `Struct` is then added, so this implies the same value count for each instance.  The series is concluded with `Close`.
-
-For example, a list of 3 objects each with fields 0,1,2 could be: 249, 1, 135, 1, 1, 1, 2, 2, 2, 3, 3, 3, 239
+* `11110000` — more groups follow, fields +0, +1 follow, +2, +3, +4, +5 are omitted
+* `01100001` — last group, fields +0 and +5 follow, while +1, +2, +3, +4 are omitted
 
 ### Tagged Values
 
