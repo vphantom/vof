@@ -39,6 +39,7 @@ Release Candidate 7 - 2026-01-21
 
 ## ROADMAP
 
+- [ ] Refactor README for VOF vs VOF Binary distinction
 - [ ] Introduce PATCH format (struct where list expected) for parity with our JSON API
 - [ ] Struct: null vs absent, for PATCH operations, equating them may be undesirable
 - [ ] Test round-trips to try to catch fatal design issues

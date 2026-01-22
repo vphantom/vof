@@ -2,9 +2,9 @@
 
 VOF specifies high-level data types and API design concepts, which can be encoded as:
 
-* **JSON:** Human-readable formats, easy to use by third parties
-* **CBOR:** Compact data representations, while relying on proven encoders
-* **VOF Binary:** Most compact data representation, efficient encoding, but "yet another serialization format"
+* **JSON:** Human-readable formats, easy to use by third parties, although pretty verbose
+* **CBOR:** Compact data representations, while relying on a proven low-level format
+* **VOF Binary:** Most compact data representation, efficient encoding but "yet another serialization format"
 
 Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceeding 100-200 bytes.  Decoders can always know unambiguously the format of VOF data by inspecting the first few bytes:
 

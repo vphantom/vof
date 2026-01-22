@@ -69,7 +69,7 @@ Future versions of VOF may reserve tags 64+ for our defined data types (i.e. `bo
 
 ### Reserved Types
 
-The 4 reserved control values are predetermined to use the same structure as `Data`: an unsigned number of bytes follows, and then as many bytes as specified.  This makes room for future types such as large integers or floats while guaranteeing that older decoders can safely skip over such unknown value types.
+The reserved control values are predetermined to use the same structure as `Data`: an unsigned number of bytes follows, and then as many bytes as specified.  This makes room for future types such as large integers or floats while guaranteeing that older decoders can safely skip over such unknown value types.
 
 ### Maps
 
