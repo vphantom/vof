@@ -64,18 +64,31 @@ Identifiers are unsigned integers starting from 0 (CBOR/Binary, similar to Proto
 
 In CBOR/Binary, variants, enums and struct fields are identified by a unique unsigned integer (similar to Protobuf), which should also be reserved forever.  For a given context (for example, a company's HTTP API), encoders should maintain a global, namespaced symbol table.  Applications calling encoder functions for these three types must provide a namespace (i.e. `com.example.order.line`) in which field names will be assigned integers starting from zero as they are first encountered.  This table must be managed centrally and shared with other endpoints (much like Protobuf IDL `.proto` files must be shared among endpoints).
 
-Symbol tables are simple JSON files, an object with nested namespace components.  Each final object must be sorted by integer ID to facilitate version control and manual editing.  Implementations using a read-only symbol table (normal production use) should fail when encountering an unknown namespace, name or ID.
+Symbol tables are simple 7-bit ASCII files listing symbols in field order and are thus strictly append-only for each namespace, to preserve field IDs forever.
 
-```json
-{
-  "com.example.order.line": {
-    "i": 0,
-    "product": 1,
-    "qty": 2,
-    "unit_price": 3
-  }
-}
+* Lines are terminated by LF or CR-LF, stripped when reading;
+* Empty lines are ignored;
+* Lines starting with '#' are ignored;
+* Lines starting with a TAB are symbols in the current namespace;
+* Other lines are namespace declarations.
+
 ```
+# VOF Symbol Table
+
+com.example.order
+	id
+	customer
+	lines
+	total
+
+com.example.order.line
+	i
+	product
+	qty
+	unit_price
+```
+
+In the above example, symbol 'customer' in namespace 'com.example.order' is ID `1`.
 
 ### NDArray
 

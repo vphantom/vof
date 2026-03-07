@@ -35,7 +35,7 @@ Regarding schema evolution, similarly to Google Protocol Buffers, since readers 
 
 ### Specification Status
 
-Release Candidate 7 - 2026-01-21
+Release Candidate 8 - 2026-03-07
 
 ## ROADMAP
 
