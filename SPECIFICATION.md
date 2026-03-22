@@ -1,21 +1,5 @@
 # Vanilla Object Format
 
-VOF specifies high-level data types and API design concepts, which can be encoded as:
-
-* **JSON:** Human-readable formats, easy to use by third parties, although pretty verbose
-* **CBOR:** Compact data representations, while relying on a proven low-level format
-* **VOF Binary:** Most compact data representation, efficient encoding but "yet another serialization format"
-
-Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceeding 100-200 bytes.  Decoders can always know unambiguously the format of VOF data by inspecting the first few bytes:
-
-| First byte(s)       | Unique meaning                  |
-|---------------------|---------------------------------|
-| 0x1F 0x8B           | Gzip                            |
-| 0x28 0xB5 0x2F 0xFD | Zstd                            |
-| 0x5B or 0x7B        | JSON (array, object)            |
-| 0x80-0xDF           | CBOR (array, map, tag, magic)   |
-| 0xEB-0xFF           | VOF Binary (non-numeric, magic) |
-
 ## Data Types
 
 These are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.  As such, types such as decimal and coordinates do not use explicit tags in the CBOR encoding, favoring compactness.  See `BINARY.md` for details of VOF's own binary encoding and advanced semantic tag use.
@@ -28,12 +12,12 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `ndarray`         | `list[[sizes…], values…]`                                | _same_          | Array (nested)                                               |
 | `map`             | `list` alternating keys and values                       | Map             | Object                                                       |
 | `variant`/`enum`  | `list[Int,values…]` / `Int`                              | _same_          | Array[String,values…] / String                               |
-| `struct`          | S.Open + groups…                                         | Map (keys: IDs) | Object (keys: names)                                         |
+| `record`          | S.Open + groups…                                         | Map (keys: IDs) | Object (keys: names)                                         |
 | `series`          | `list[[IDs…], values…]`                                  | _same_          | 2D Array (row 0: names)                                      |
 | `string`          | String + size + bytes as UTF-8                           | String          | String (necessarily UTF-8)                                   |
 | `bytes`/`data`    | Data + size + raw bytes                                  | String          | String base-64 URL encoded                                   |
-| `uint`            | Int                                                      | Int             | Number / `decimal`                                           |
-| `int`/`sint`      | Int signed                                               | Int             | Number / `decimal`                                           |
+| `uint`            | Int                                                      | Int             | Number / String if outside MIN/MAX for float64               |
+| `int`/`sint`      | Int signed                                               | Int             | Number / String if outside MIN/MAX for float64               |
 | `decimal`/`dec`   | `sint << 3` + 0..9 places                                | _same_          | String: optional `-` + 1+ digits + possibly `.` and 1+ digits |
 | `ratio`           | `list[int,uint]`                                         | _same_          | String: optional `-` + digits + `/` + digits                 |
 | `percent`         | `dec` rebased to 1 (i.e. 50% is 0.5)                     | _same_          | String: `decimal` hundredths + `%`                           |
@@ -58,11 +42,31 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `subnet`/`net`    | `list[ip,uint]` CIDR notation                            | _same_          | String: CIDR notation                                        |
 | `coords`          | `list[dec,dec]` WGS84                                    | _same_          | _same_                                                       |
 
-### Variant / Enum / Struct
+### Units of measure
 
-Identifiers are unsigned integers starting from 0 (CBOR/Binary, similar to Protobuf) and strings (JSON).  To avoid version conflicts, **identifiers must remain reserved forever when they are deprecated.**  Variants and Enums should have their first or all letters uppercase while Struct field names should begin with a lowercase letter.
+We use codes from UN/CEFACT Recommendation 20.  See full list at: [unece.org](https://tfig.unece.org/contents/recommendation-20.htm).  Quantities should default to `EA` (each) when they do not carry an explicit unit code.  Here are some of the most common codes:
 
-In CBOR/Binary, variants, enums and struct fields are identified by a unique unsigned integer (similar to Protobuf), which should also be reserved forever.  For a given context (for example, a company's HTTP API), encoders should maintain a global, namespaced symbol table.  Applications calling encoder functions for these three types must provide a namespace (i.e. `com.example.order.line`) in which field names will be assigned integers starting from zero as they are first encountered.  This table must be managed centrally and shared with other endpoints (much like Protobuf IDL `.proto` files must be shared among endpoints).
+| Category | Units                                                        |
+| -------- | ------------------------------------------------------------ |
+| Grouping | `EA` Each • `PR` Pair • `P3` Three-pack • `P4` Four-pack • `P5` Five-pack • `P6` Six-pack • `P8` Eight-pack • `DZN` Dozen • `CEN` Hundred |
+| Form     | `AY` Assembly • `CG` Card • `DC` Disk • `NF` Message • `NV` Vehicle • `RU` Run • `SET` Set • `SX` Shipment • `ZP` Page |
+| Time     | `SEC` Second • `MIN` Minute • `HUR` Hour • `LH` Labor hour • `DAY` Day • `MON` Month • `ANN` Year |
+| Weight   | `GRM` Gram • `KGM` Kilogram • `LBR` Pound                    |
+| Length   | `CMT` Centimetre • `MTR` Metre • `INH` Inch • `FOT` Foot • `YRD` Yard |
+| Area     | `CMK` Square centimetre • `MTK` Square meter • `INK` Square inch • `FTK` Square foot • `YDK` Square yard |
+| Volume   | `MLT` Millilitre • `LTR` Litre • `INQ` Cubic inch • `ONZ` Ounce • `OZA` Fluid ounce US • `OZI` Fluid ounce UK • `QT` Quart US • `QTI` Quart UK • `GLL` Gallon US • `GLI` Gallon UK |
+| Energy   | `KWH` Kilowatt hour                                          |
+| Data     | `2P` Kilobyte • `4L` Megabyte            |
+
+### Namespaces: Variant, Enum, Record
+
+A project or API has a root namespace, i.e. `com/example`.
+
+Variant, Enum and Record types need unique namespaces in plural form for API consistency purposes, for example: `com/example/orders/lines`
+
+Identifiers within a namespace are strings (JSON) and unsigned integers starting from 0 (CBOR/Binary, similar to Protobuf).  To avoid version conflicts, **identifiers must remain reserved forever when they are deprecated.**  Variants and Enums should have their first or all letters uppercase while record field names should begin with a lowercase letter.
+
+In CBOR/Binary, variants, enums and record fields are identified by a unique unsigned integer (similar to Protobuf), which should also be reserved forever.  For a given context (for example, a company's HTTP API), encoders should maintain a global, namespaced symbol table.  Applications calling encoder functions for these three types must provide a namespace (i.e. `com/example/order/line`) in which field names will be assigned integers starting from zero as they are first encountered.  This table must be managed centrally and shared with other endpoints (much like Protobuf IDL `.proto` files must be shared among endpoints).
 
 Symbol tables are simple 7-bit ASCII files listing symbols in field order and are thus strictly append-only for each namespace, to preserve field IDs forever.
 
@@ -75,20 +79,20 @@ Symbol tables are simple 7-bit ASCII files listing symbols in field order and ar
 ```
 # VOF Symbol Table
 
-com.example.order
+com/example/orders
 	id
 	customer
 	lines
 	total
 
-com.example.order.line
+com/example/orders/lines
 	i
 	product
 	qty
 	unit_price
 ```
 
-In the above example, symbol 'customer' in namespace 'com.example.order' is ID `1`.
+In the above example, symbol 'customer' in namespace 'com/example/orders' is ID `1`.
 
 ### NDArray
 
@@ -98,7 +102,7 @@ For example, a 3D array of size 2x2x2 could be: `[[2,2,2],1,2,3,4,5,6,7,8]`
 
 ### Series
 
-Compact representation of a list of `struct` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON, this is a 2-D Array where the first row selects fields by name and each subsequent row is an Array with just those values.  In CBOR/Binary, this is a flat list where the first item is a list of numeric field IDs and the other items are the values of each struct, one after the other (no wrapping necessary).
+Compact representation of a list of `record` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON, this is a 2-D Array where the first row selects fields by name and each subsequent row is an Array with just those values.  In CBOR/Binary, this is a flat list where the first item is a list of numeric field IDs and the other items are the values of each record, one after the other (no wrapping necessary).
 
 ### Decimal
 
@@ -136,7 +140,7 @@ The canonical encoding is to use the bare `string` form when a single language i
 
 * The regular MIME type (`application/json`) for JSON encoded transfers is recommended for compatibility.
 
-* When possible, Objects should be sorted by ascending key when buffering the whole list is possible, to facilitate compression.
+* When possible, records should be sorted by ascending key when buffering the whole list is possible, to facilitate compression.
 
 * Number, `decimal` and `ratio` must strip leading zeros and trailing decimal zeros.
 
@@ -156,13 +160,209 @@ The canonical encoding is to use the bare `string` form when a single language i
 
 ## API Best Practices
 
-**TODO:** designing collections (heaps and refs, which the IDL allows creating just fine like our former Protobuf Request/Response messages), using `select~` query parameters instead of Protobuf's FieldMask, making filtering query parameters
+This section suggests a standard for designing HTTP APIs with the VOF data types.
+
+URLs described would be relative to the root of where the API is served (i.e. `https://api.example.com/api/12.1/`) so for example `GET …/users` would mean getting `/api/12.1/users`.
+
+With methods carrying content (`PATCH`, `POST`) should use `Content-Type: application/json` and `X-Content-Type-Options: nosniff` to prevent second-guessing based on contents.
+
+If you need to issue multiple API requests within a few seconds, HTTP/1.1 `keepalive` use is encouraged.
+
+### HTTP Response Codes
+
+| Code                        | Methods        | Notes                                     |
+| --------------------------- | -------------- | ----------------------------------------- |
+| `200 OK`                    | _all_          | Success with a response body              |
+| `201 Created`               | `POST`         | Success with a response body              |
+| `400 Bad Request`           | `GET`, `POST`  | Fatal error, don't retry this query as-is |
+| `401 Unauthorized`          | _all_          | Authentication failure                    |
+| `403 Forbidden`             | _all_          | Authentication valid but insufficient     |
+| `404 Not Found`             | `GET`, `PATCH` | Incorrect URL or non-existent ID          |
+| `423 Locked`                | _all_          | Record(s) temporarily unavailable         |
+| `429 Too Many Requests`     | _all_          | Wait and try again                        |
+| `500 Internal Server Error` | _all_          | Wait and try again                        |
+| `501 Not Implemented`       | _all_          | Fatal error, don't retry                  |
+
+### Conventions
+
+* Use `decimal` and its derivatives for financial data which requires exact precision (quantities, amounts) and `float64` for ratios and other non-financial data better suited for floating point numbers.
+* Record field types may only ever be changed for wire-compatible ones.  For example, `decimal` could become `String`, but not the other way around.
+* Generated views/reports should be declared as record types in their module, probably with a `Series` result.
+* Variant/Enum/Record use `Capitalized` names.  Dependent records are namespaced in their parent, i.e. `Order.Line` used by `Order`.
+* Fields use `snake_case`.  Pluralize lists (i.e. `lines`)
+* When naming fields referring to other record types:
+  * Use `foo(s)` when embedding instances
+  * Use `foo_id(s)` when referring by ID
+* Field names with multiple words should go from most to least precise (i.e. prefer `item_qty` over `qty_item`)
+* Suffix non-self-describing field names to clarify their type when the value might not be obvious: `_code`, `_id`, `_amt` or `_price`, `_qty`, `_tax`
+
+### GET Parameters
+
+These query string parameters are available for all `GET` requests.  In order to avoid conflicts with field names, all these parameters end with a tilde (`~`).  This also has the benefit of being visually distinctive (i.e. `max~=20` for a result limit).
+
+#### `select~`
+
+(Default: `*`.)  When only a subset of a record's fields are of interest, adding a `select~` query string parameter to any `GET` request filters them at the source.  This is a comma-delimited list of field names, which can take the following forms:
+
+* `*` — Include all fields at this level (required to use `!` exclusions).
+* `id` — It is never necessary to request this field explicitly, as it is always included with records.
+* `foo` — Regular field to be included.
+* `*,!foo` — All fields except `foo`.
+* `foo_id` — Reference by ID to be included.
+* `foo_id` requested as `foo` or `foo[*]` — Stripping the field's suffix requests that `foo_id` be included _and_ that the referred record be included in `Response.heap`.
+* `foo[bar,baz]` — Only include fields `id` (if any), `bar` and `baz` of dependent or referenced field `foo` or `foo_id`.
+* `*,foo[*,!bar]` — All fields, except the `bar` field of `foo`.
+
+Example: `GET …/orders?user_id=…&select~=ordered_on,grand_total,lines[qty,unit_price,product[name]]`
+
+#### `prune~`
+
+(Default: none.)  List of a record's fields (expected to be lists of children) to filter based on row filters.  Use `*` to mean "any applicable lists of children."
+
+#### `max~` and `page~`
+
+(Defaults: `max~=100` and `page~=1`)  Restricts results returning multiple records to fewer per call.
+
+#### Row Filters
+
+Use the form `<field>=[<operator>:]<value(s)>` inspired by PostgREST to filter by field value.  For example, `created_on=atleast:20250101` filters out records which were created before 2025-01-01, `id=1234` requires an ID of "1234" and `is_draft=$false` requires that `is_draft` not be truthy.  Appending '!' to a field name negates its operator, like `name!=has:Smith` selects all names _not_ including keyword "Smith".  Filters are additive (all must be met) and fields may be specified more than once.
+
+Available operators (some with synonyms):
+
+| Operator              | Meaning                                                     |
+| --------------------- | ----------------------------------------------------------- |
+| _none_                | equals exactly                                              |
+| `lt`/`under`/`before` | field is less than                                          |
+| `lte`/`upto`          | field is less than or equal                                 |
+| `gt`/`over`/`after`   | field is greater than                                       |
+| `gte`/`atleast`       | field is greater than or equal                              |
+| `between`             | inclusive, i.e. `created_on=between:20250101:20251231`      |
+| `has`                 | string contains keyword                                     |
+| `in(…)`               | exactly one of these values, i.e. `categ_id=in:123:234:345` |
+
+Special values:
+
+| Value    | Meaning                                                  |
+| -------- | -------------------------------------------------------- |
+| `$true`  | truthy value (`true`, non-zero number, non-empty string) |
+| `$false` | falsey value (`false`, zero, empty string)               |
+
+Using filters on children implies that parents without any matching children will not be included.  By default, all children of included parents are included, unless specified in `prune~`.
+
+For example, `…/orders?prune~=lines&date=between:20250101:20251231&lines.product=in(ABC,DEF)` would return orders placed in 2025 which have lines about products ABC or DEF, but each order would only incude lines about products ABC or DEF.
+
+### PATCH Updates
+
+A `PATCH` record is a possibly incomplete copy of an existing record with the primary key specified in the URL and/or in the record itself.  The patch version of a record has the exact same structure as the record itself (like a normal REST `PUT`), with the following additional operations available for convenience:
+
+* Omit any field to leave it unchanged
+* Set any field to `Null` to unset its value
+* In arrays of records:
+  * Unchanged: omit record entirely
+  * Add: record without primary key
+  * Edit: record with primary key and at least one other field
+  * Delete: record with only primary key
+* Other arrays are full replacements
+
+```json5
+// Example patch on a hypothetical order record
+{
+  // Simple field updates
+  delivered_on: null,
+  deliver_by: 20250131,
+
+  // Array replacement (simple values)
+  labels: [ "red", "blue" ],
+  notify_user_ids: [ 836583, 647684 ],  // Remove previous CC list, add these two
+
+  // Discrete operations on arrays of private child records
+  lines: [
+    // Line i=1 unchanged
+    { i: 2 },  // Delete line i=2
+    { i: 3, qty: "1.3", subtotal: "13" },  // New values in line i=3
+    { qty: "5", retail_amt: "5.05", subtotal: "25" },  // New line, server-assigned i
+    { qty: "4", retail_amt: "1", subtotal: "4" },  // Other new line
+  ]
+}
+```
+
+### Standard Endpoints
+
+Unless specified otherwise, record types offer an endpoint corresponding to its namespace without the global prefix. (i.e. `com/example/orders/accounts` would be `…/orders/accounts`)  Below, `{path}` represents this path (i.e. `orders/accounts`) and `{Record}` the main record type (i.e. "Order").  Some child-only types (i.e. order lines) don't necessarily have endpoints.
+
+Ping endpoint: `GET …/` should return a Response with `status` set to "success".
+
+Simple endpoints:
+
+| Endpoint                    | Request               | Response fields                |
+| --------------------------- | --------------------- | ------------------------------ |
+| `GET …/{path}/{id}`         | -                     | `heap` with exactly one record |
+| `GET …/{path}[?…]`          | -                     | `heap` with records            |
+| `POST …/{path}`             | `{Record}` without ID (new) | `affected`               |
+| `PATCH …/{path}`            | `{Record}` with ID (existing) | `affected`, `ignored` optional |
+| `DELETE …/{path}/{id1}[,…]` | -                     | `affected`, `ignored` optional |
+
+Multiplexed endpoints are on the root path, which is reserved for protocol-level use:
+
+| Endpoint   | Request                               | Response fields       |
+| ---------- | ------------------------------------- | --------------------- |
+| `POST …/`  | `Heap` of records without IDs (new)   | `affected`            |
+| `PATCH …/` | `Heap` of patches with IDs (existing) | `affected`, `ignored` |
+
+When clients POST/PATCH, they should collect records and all their descendants recursively.  Records with old or no modified time should be added as references, dependent and recent records should be included in full.  If the server is missing information to complete the request, the `Response` status should be "partial" or "failed" and the missing records detailed in `ignored` so the client may add the records to their heap and try again.
+
+#### Ref
+
+Qualified reference to a record.  Typically contains a primary key ID and optionally a modification time for sync and/or a message for error reporting (i.e. in a failed/partial `Response` it could explain why one failed).  This is a root-level namespace in a project, i.e. `com/example/ref`.  A project should define a single scalar type for record identity (typically `uint` or `String`) used across all record types, being a surrogate if necessary to internal composite keys.  For example, it could be:
+
+| Field           | Type                 | Notes                       |
+| --------------- | -------------------- | --------------------------- |
+| `id`            | `uint`               |                             |
+| `last_modified` | `timestamp` optional | Last modification timestamp |
+| `why`           | `String` optional    | Why the record failed       |
+
+#### Heap
+
+Collection of records and references, thus with 2 fields for each major structure type of a project.  This is a root-level namespace in a project, like `com/example/heap`, structured as:
+
+| Field           | Type              |
+| --------------- | ----------------- |
+| `orders`        | `Array<Order>`    |
+| `ref_orders`    | `Array<Ref>`      |
+| `products`      | `Array<Product>`  |
+| `ref_products`  | `Array<Ref>`      |
+| ...             | ...               |
+
+### Response
+
+Standard structure returned with every HTTP response.  It consists of standard fields, plus one per major structure type.  This is a root-level namespace in a project, like `com/example/response`, structured as:
+
+| Field       | Type                   | Notes                                                        |
+| ----------- | ---------------------- | ------------------------------------------------------------ |
+| `status`    | `String`               | One of: "success", "partial", "failed"                       |
+| `error`     | `String` optional      |                                                              |
+| `affected`  | `Heap` optional        | Records which were processed successfully                    |
+| `ignored`   | `Heap` optional        | Explanations included for records which couldn't be processed |
+| `heap`      | `Heap` optional        | Records referenced by the main record or list                |
+| `remaining` | `uint` optional        | If the current result set is limited, how many items follow |
+| `orders`    | `OrderResponse`        | Additional fields specific to responses from the Order module(s) |
+| ...         | ...                    |                                                                  |
 
 ## Implementation Considerations
 
+Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceeding 100-200 bytes.  Decoders can always know the format of VOF data by inspecting the first few bytes:
+
+| First byte(s)       | Unique meaning                  |
+|---------------------|---------------------------------|
+| 0x1F 0x8B           | Gzip                            |
+| 0x28 0xB5 0x2F 0xFD | Zstd                            |
+| 0x5B or 0x7B        | JSON (array, object)            |
+| 0x80-0xDF           | CBOR (array, map, tag, magic)   |
+| 0xEB-0xFF           | VOF Binary (non-numeric, magic) |
+
 ### Series
 
-Encoders should use the first object of the list to determine the structure of all objects in the list.  They should fail if a subsequent member has extra fields set.  If subsequent members are missing any fields though, encoders should encode `Null` for them in order to keep going.
+Encoders should use the first record of the list to determine the structure of all records in the list.  They should fail if a subsequent member has extra fields set.  If subsequent members are missing any fields though, encoders should encode `Null` for them in order to keep going.
 
 ## Design Compromises
 

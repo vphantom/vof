@@ -18,7 +18,7 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 |            | Float 32,64        | `< 235`   | Next 4,8 bytes are IEEE 754 Little Endian         |
 |            | Null               | `== 235`  |                                                   |
 |            | String             | `== 236`  | Next is size in bytes, then as many UTF-8 bytes   |
-|            | Struct Open        | `== 237`  | Open (groups until Struct Close)                  |
+|            | Record Open        | `== 237`  | Open (groups until Record Close)                  |
 |            | List Open          | `== 238`  | Values until `List Close`                         |
 |            | Close              | `== 239`  | Close nearest `List Open`                         |
 |            | List               | `< 249`   | Exactly 0..8 items (no Close)                     |
@@ -37,9 +37,9 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 
 When an integer is considered signed, its least significant bit before encoding into the above indicates the sign.  Encoding from typical 2's complement is `(i >> (int_size - 1)) XOR (i << 1)` and decoding is `(value >> 1) XOR -(value AND 1)`.  This is identical to Protbuf's "ZigZag" encoding.
 
-### Struct
+### Record
 
-Structs are groups of values, each structured as a field selector byte followed by as many values as that byte specifies.  Fields must thus not be duplicated and be encoded in ascending numeric order.  A regular list of alternating field IDs and values should be used for sparse cases where there are gaps of 64+ between fields to be encoded.  Field selector bytes are structured as:
+Records are groups of values, each structured as a field selector byte followed by as many values as that byte specifies.  Fields must thus not be duplicated and be encoded in ascending numeric order.  A regular list of alternating field IDs and values should be used for sparse cases where there are gaps of 64+ between fields to be encoded.  Field selector bytes are structured as:
 
 * **Most Significant Bit:** continuation indicator
   * `0` — this is the last group

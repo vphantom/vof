@@ -4,22 +4,30 @@
 
 <!-- [![GitHub release](https://img.shields.io/github/release/vphantom/vof.svg?style=plastic)]() -->
 
-Really, yet another serialization format?  Yes, but one of the simplest yet most compact!  This fills a niche use case of ours somewhere between JSON, CBOR and Protocol Buffers with the following goals:
+VOF is an API design, type system and serialization specification.  It fills my need to facilitate interoperability between JSON, CBOR, Protocol Buffers and SQLite for business applications.  The types can be serialized in three formats:
+
+* **JSON** — Human-readable, fairly self-documenting but verbose
+* **CBOR** — Very compact using CBOR as a low-level format
+* **VOF Binary** — Most compact but custom encoding
+
+All three formats can be transacted as-is or with Gzip or Zstd compression.
+
+Design goals:
 
 * Easy to implement in a new language (weekend project)
 * Low CPU/memory requirements to encode and especially decode
-* Smaller output size (even vs JSON+gzip)
-* Streamable (unlike Protobuf)
-* Compact struct type (unlike CBOR)
-* Easy versioning with numbered struct fields (like Protobuf)
-* Convention for higher-level types (decimal, datetime, etc.)
-* Optional explicit typing on the wire (like CBOR)
-* JSON encoding fairly self-describing (i.e. "50%", "3/4", unlike Protobuf)
-* CBOR encoding with most of VOF Binary's advantages while using off-the-shelf libraries
+* Space-efficient output size
+* Easy versioning with numbered record fields (like Protobuf)
 * Application-facing references (de-duplication on the wire and in memory)
 * Schema-based (writers and readers agree on types out-of-band)
 * Enough explicit type information for inspection of unknown data
-* Explicit binary-CBOR-JSON interoperability (like Protobuf)
+* Explicit JSON-CBOR-VOF interoperability (like Protobuf)
+* Unambiguous decoding from any specified format and compression scheme
+
+Goals specific to VOF Binary:
+
+* Streamable
+* Very compact record type
 
 The name "vanilla" was chosen to symbolize the aim to keep the format as simple and generic as possible.
 
@@ -27,24 +35,20 @@ The name "vanilla" was chosen to symbolize the aim to keep the format as simple 
 
 The format itself allows for very large numeric sizes and makes room for future more complex types with the concept of reserved tags.  This format is thus forward-compatible with future versions.
 
-Regarding schema evolution, similarly to Google Protocol Buffers, since readers and writers must agree on a format out of band, basic rules must be followed to ensure good forward and backward compatibility:
+To help with schema evolution, VOF specifies namespace files to be shared between endpoints to keep symbols reserved forever.  Unlike a true IDL, these files contain no type information.  It is up to endpoints to agree on types out of band (usually in documentation) and to follow the basic rules of backward and forward compatibility:
 
-* Deprecated fields must never be reused;
-* Field types may be updated, but only in backwards-compatible ways (i.e. `int` vs `enum`);
-* Field IDs must never be reused.
+* Fields must never be repurposed;
+* Types may be updated, but only in backwards-compatible ways (i.e. `int` vs `enum`).
 
 ### Specification Status
 
-Release Candidate 8 - 2026-03-07
+Release Candidate 9 - 2026-03-22
 
 ## ROADMAP
 
-- [ ] Refactor README for VOF vs VOF Binary distinction
-- [ ] Introduce PATCH format (struct where list expected) for parity with our JSON API
-- [ ] Struct: null vs absent, for PATCH operations, equating them may be undesirable
+- [ ] Record: null vs absent, for PATCH operations, equating them may be undesirable
 - [ ] Test round-trips to try to catch fatal design issues
 - [ ] Create data files to help test all implementations
-- [ ] Create a `CONTRIBUTING.md`
 - [ ] Have the docs proofread for clarity
 
 ## SPECIFICATIONS
