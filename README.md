@@ -53,7 +53,8 @@ Release Candidate 9 - 2026-03-22
 
 ## SPECIFICATIONS
 
-* [Data Types](SPECIFICATION.md)
+* [JSON-Only Types & APIs](JSON_APIs.md)
+* [Full Types & APIs](SPECIFICATION.md)
 * [VOF Binary Encoding](BINARY.md)
 
 ## ACKNOWLEDGEMENTS

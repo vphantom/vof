@@ -4,43 +4,41 @@
 
 These are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.  As such, types such as decimal and coordinates do not use explicit tags in the CBOR encoding, favoring compactness.  See `BINARY.md` for details of VOF's own binary encoding and advanced semantic tag use.
 
-| Type Name         | JSON                                                         | VOF Binary                                           | CBOR            |
-| ----------------- | ------------------------------------------------------------ | ---------------------------------------------------- | --------------- |
-| `null`            | Null                                                         | Null                                                 | _same_          |
-| `bool`            | Boolean                                                      | False: Int 0 / True: Int 1                           | False, True     |
-| `list`            | Array                                                        | List(0..8) + 0..8 vals<br />List Open + vals + Close | Array           |
-| `ndarray`         | Array (nested) <!-- adv -->                                  | `list[[sizes…], values…]`                            | _same_          |
-| `map`             | Object                                                       | `list` alternating keys and values                   | Map             |
-| `variant`/`enum`  | Array[String,values…] / String                               | `list[Int,values…]` / `Int`                          | _same_          |
-| `record`          | Object (keys: names)                                         | S.Open + groups…                                     | Map (keys: IDs) |
-| `series`          | 2D Array (row 0: names)                                      | `list[[IDs…], values…]`                              | _same_          |
-| `string`          | String (necessarily UTF-8)                                   | String + size + bytes as UTF-8                       | String          |
-| `bytes`/`data`    | String base-64 URL encoded                                   | Data + size + raw bytes                              | String          |
-| `uint`            | Number / String if outside MIN/MAX for float64               | Int                                                  | Int             |
-| `int`/`sint`      | Number / String if outside MIN/MAX for float64               | Int signed                                           | Int             |
-| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | `sint << 3` + 0..9 places                            | _same_          |
-| `ratio`           | String: optional `-` + digits + `/` + digits                 | `list[int,uint]`                                     | _same_          |
-| `percent`         | String: `decimal` hundredths + `%`                           | `dec` rebased to 1 (i.e. 50% is 0.5)                 | _same_          |
-| `float32`         | Number <!-- adv -->                                          | Float 32                                             | Float           |
-| `float64`         | Number                                                       | Float 64                                             | Float           |
-| `date`/`_on`      | `uint` as `YYYYMMDD`                                         | `uint`                                               | _same_          |
-| `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                     | `uint`                                               | _same_          |
-| `timestamp`       | `int` Epoch `- 1,750,750,750`                                | _same_                                               | _same_          |
-| `timespan`/`span` | `list[int,int,int]`                                          | _same_                                               | _same_          |
-| `code`            | `string` strictly `[A-Z0-9_]`                                | _same_                                               | _same_          |
-| `language`/`lang` | `code` IETF BCP-47                                           | _same_                                               | _same_          |
-| `country`/`cntry` | `code` ISO 3166-1 alpha-2                                    | _same_                                               | _same_          |
-| `region`/`rgn`    | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)         | _same_                                               | _same_          |
-| `currency`/`curr` | `code` ISO 4217 alpha-3                                      | _same_                                               | _same_          |
-| `tax_code`        | `code` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym     | _same_                                               | _same_          |
-| `unit`            | `code` UN/CEFACT Rec. 20                                     | _same_                                               | _same_          |
-| `text`            | `map` of `lang,string` pairs<br />`string` for just one      | _same_                                               | _same_          |
-| `amount`/`price`  | String: `dec`<br />+ optional space and `curr`               | `list[dec,curr]` / `dec`                             | _same_          |
-| `tax`/`tax_amt`   | String: `dec`<br />+ optional space and `curr`<br />+ mandatory space + `tax_code` | `list[dec,tax_code,curr]`<br />`list[dec,tax_code]`  | _same_          |
-| `quantity`        | String: `dec`<br />+ optional space and `unit`               | `list[dec,unit]` / `dec`                             | _same_          |
-| `ip`              | String: IPv4 or IPv6 notation                                | `bytes` with 4 or 16 bytes                           | _same_          |
-| `subnet`/`net`    | String: CIDR notation                                        | `list[ip,uint]` CIDR notation                        | _same_          |
-| `coords`          | `list[dec,dec]` WGS84                                        | _same_                                               | _same_          |
+| Type Name         | JSON                                                         |
+| ----------------- | ------------------------------------------------------------ |
+| `null`            | Null                                                         |
+| `bool`            | Boolean                                                      |
+| `list`            | Array                                                        |
+| `map`             | Object                                                       |
+| `variant`/`enum`  | Array[String,values…] / String                               |
+| `record`          | Object (keys: names)                                         |
+| `series`          | 2D Array (row 0: names)                                      |
+| `string`          | String (necessarily UTF-8)                                   |
+| `bytes`/`data`    | String base-64 URL encoded                                   |
+| `uint`            | Number / String if outside MIN/MAX for float64               |
+| `int`/`sint`      | Number / String if outside MIN/MAX for float64               |
+| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits |
+| `ratio`           | String: optional `-` + digits + `/` + digits                 |
+| `percent`         | String: `decimal` hundredths + `%`                           |
+| `float64`         | Number                                                       |
+| `date`/`_on`      | `uint` as `YYYYMMDD`                                         |
+| `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                     |
+| `timestamp`       | `int` Epoch `- 1,750,750,750`                                |
+| `timespan`/`span` | `list[int,int,int]`                                          |
+| `code`            | `string` strictly `[A-Z0-9_]`                                |
+| `language`/`lang` | `code` IETF BCP-47                                           |
+| `country`/`cntry` | `code` ISO 3166-1 alpha-2                                    |
+| `region`/`rgn`    | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)         |
+| `currency`/`curr` | `code` ISO 4217 alpha-3                                      |
+| `tax_code`        | `code` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym     |
+| `unit`            | `code` UN/CEFACT Rec. 20                                     |
+| `text`            | `map` of `lang,string` pairs<br />`string` for just one      |
+| `amount`/`price`  | String: `dec`<br />+ optional space and `curr`               |
+| `tax`/`tax_amt`   | String: `dec`<br />+ optional space and `curr`<br />+ mandatory space + `tax_code` |
+| `quantity`        | String: `dec`<br />+ optional space and `unit`               |
+| `ip`              | String: IPv4 or IPv6 notation                                |
+| `subnet`/`net`    | String: CIDR notation                                        |
+| `coords`          | `list[dec,dec]` WGS84                                        |
 
 ### Units of measure
 
@@ -64,87 +62,21 @@ A project or API has a root namespace, i.e. `com/example`.
 
 Variant, Enum and Record types need unique namespaces in plural form for API consistency purposes, for example: `com/example/orders/lines`
 
-<!-- advanced -->
-
-Identifiers within a namespace are strings (JSON) and unsigned integers starting from 0 (CBOR/Binary, similar to Protobuf).  To avoid version conflicts, **identifiers must remain reserved forever when they are deprecated.**  Variants and Enums should have their first or all letters uppercase while record field names should begin with a lowercase letter.
-
-In CBOR/Binary, variants, enums and record fields are identified by a unique unsigned integer (similar to Protobuf), which should also be reserved forever.  For a given context (for example, a company's HTTP API), encoders should maintain a global, namespaced symbol table.  Applications calling encoder functions for these three types must provide a namespace (i.e. `com/example/order/line`) in which field names will be assigned integers starting from zero as they are first encountered.  This table must be managed centrally and shared with other endpoints (much like Protobuf IDL `.proto` files must be shared among endpoints).
-
-Symbol tables are simple 7-bit ASCII files listing symbols in field order and are thus strictly append-only for each namespace, to preserve field IDs forever.
-
-* Lines are terminated by LF or CR-LF, stripped when reading;
-* Empty lines are ignored;
-* Lines starting with '#' are ignored;
-* Lines starting with a TAB are symbols in the current namespace;
-* Other lines are namespace declarations.
-
-```
-# VOF Symbol Table
-
-com/example/orders
-	id
-	customer
-	lines
-	total
-
-com/example/orders/lines
-	i
-	product
-	qty
-	unit_price
-```
-
-In the above example, symbol 'customer' in namespace 'com/example/orders' is ID `1`.
-
-### NDArray
-
-Fixed-size multi-dimensional lists.  This is a list where the first item is a list of dimension sizes, followed by each value from zero-index onward, exactly as many values as the product of all dimension sizes.
-
-For example, a 3D array of size 2x2x2 could be: `[[2,2,2],1,2,3,4,5,6,7,8]`
-
-<!-- /advanced -->
-
 ### Series
 
 Compact representation of a list of `record` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON, this is a 2-D Array where the first row selects fields by name and each subsequent row is an Array with just those values.
-
-<!-- adv --> In CBOR/Binary, this is a flat list where the first item is a list of numeric field IDs and the other items are the values of each record, one after the other (no wrapping necessary).
 
 ### Decimal
 
 Necessary for financial data.  In JSON, it must be a String to bypass possible float conversions done by some libraries.
 
-<!-- adv --> In CBOR/Binary, this is passed to the encoder as a signed integer left-shifted 3 bits to add a 3-bit value representing 0, 1, 2, 3, 4, 5, 6 or 9 decimal places.  For example, -2.135 would be `(-2135 << 3) + 3 = -17083`.
-
 ### Date
 
 Calendar date, sortable.  Time zone is outside the scope of this type, derived from context as necessary.  In JSON, a human-friendly `YYYYMMDD` number is used.
 
-<!-- advanced -->
-
-In CBOR/Binary, it is structured in 17 bits as `(year << 9) + (month << 5) + day` where:
-
-* **year** — Number of years since 1900 (i.e. 2025 is 125)
-* **month** — 1..12
-* **day** — 1..31
-
-<!-- /advanced -->
-
 ### Datetime
 
 Extends `date` with wall clock time, still sortable and with implicit time zone.  In JSON, a human-friendly `YYYYMMDDHHMM` number is used.
-
-<!-- advanced -->
-
-In CBOR/Binary, it is structured with minute precision in 28 bits as `(year << 20) + (month << 16) + (day << 11) + (hour << 6) + minute` where:
-
-* **year** — Number of years since 1900 (i.e. 2025 is 125)
-* **month** — 1..12
-* **day** — 1..31
-* **hour** — 0..23
-* **minute** — 0..59
-
-<!-- /advanced -->
 
 ### Timespan
 
@@ -165,22 +97,6 @@ The canonical encoding is to use the bare `string` form when a single language i
 * Number, `decimal` and `ratio` must strip leading zeros and trailing decimal zeros.
 
 * Integers must only encode as `decimal` when they are outside of JavaScript `MIN/MAX_SAFE_INTEGER` range.
-
-<!-- advanced -->
-
-## CBOR Encoding
-
-* The regular MIME type (`application/cbor`) for CBOR encoded transfers is recommended.
-* When possible, Maps should be sorted by ascending key when buffering the whole list is possible, to facilitate compression.  This is usually done by using a CBOR encoder in deterministic "canonical" mode, but some implementations may require applications to pass sorted lists to encoders to achieve this manually.
-* You may begin a stream with CBOR's magic, tag 55799.  No other tags should be used.
-
-## Binary Encoding
-
-* The suggested MIME type for binary encoded transfers is `application/x-vanilla-object`.  The suggested file name extension is `.vo`.
-* When possible, Maps should be sorted by ascending key when buffering the whole list is possible, to facilitate compression.
-* You may begin a stream with VOF Binary's magic, tag 5505 applied to integer 79, which encodes to `0xFF81564F`.
-
-<!-- /advanced -->
 
 ## API Best Practices
 
@@ -374,30 +290,7 @@ Standard structure returned with every HTTP response.  It consists of standard f
 
 ## Implementation Considerations
 
-<!-- advanced -->
-
-Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceeding 100-200 bytes.  Decoders can always know the format of VOF data by inspecting the first few bytes:
-
-| First byte(s)       | Unique meaning                  |
-|---------------------|---------------------------------|
-| 0x1F 0x8B           | Gzip                            |
-| 0x28 0xB5 0x2F 0xFD | Zstd                            |
-| 0x5B or 0x7B        | JSON (array, object)            |
-| 0x80-0xDF           | CBOR (array, map, tag, magic)   |
-| 0xEB-0xFF           | VOF Binary (non-numeric, magic) |
-
-<!-- /advanced -->
-
 ### Series
 
 Encoders should use the first record of the list to determine the structure of all records in the list.  They should fail if a subsequent member has extra fields set.  If subsequent members are missing any fields though, encoders should encode `Null` for them in order to keep going.
 
-<!-- advanced -->
-
-## Design Compromises
-
-* The `decimal`, `date` and `datetime` types were designed for financial systems based on SQLite and kept here for their compact sizes.
-* The `code` type was initially designed as a base 37 `uint`, but the space savings were not worth the implementation complexity.
-* The last size of `decimal` is 9 and not 7 in order to match the maximum precision allowed in some other business contexts such as ANSI X12.
-
-<!-- /advanced -->
