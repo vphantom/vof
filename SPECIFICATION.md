@@ -4,7 +4,7 @@
 
 These are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.  As such, types such as decimal and coordinates do not use explicit tags in the CBOR encoding, favoring compactness.  See `BINARY.md` for details of VOF's own binary encoding and advanced semantic tag use.
 
-| Type Name         | JSON                                                         | VOF Binary                                           | CBOR            |
+| Type Names        | JSON                                                         | VOF Binary                                           | CBOR            |
 | ----------------- | ------------------------------------------------------------ | ---------------------------------------------------- | --------------- |
 | `null`            | Null                                                         | Null                                                 | _same_          |
 | `bool`            | Boolean                                                      | False: Int 0 / True: Int 1                           | False, True     |
@@ -18,14 +18,14 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `bytes`/`data`    | String base-64 URL encoded                                   | Data + size + raw bytes                              | String          |
 | `uint`            | Number / String if outside MIN/MAX for float64               | Int                                                  | Int             |
 | `int`/`sint`      | Number / String if outside MIN/MAX for float64               | Int signed                                           | Int             |
-| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | `sint << 3` + 0..9 places                            | _same_          |
+| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | `sint << 3` + 0..9 places                           | _same_          |
 | `ratio`           | String: optional `-` + digits + `/` + digits                 | `list[int,uint]`                                     | _same_          |
-| `percent`         | String: `decimal` hundredths + `%`                           | `dec` rebased to 1 (i.e. 50% is 0.5)                 | _same_          |
+| `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")              | `dec` rebased to 1 (i.e. 50% is 0.5)                 | _same_          |
 | `float32`         | Number <!-- adv -->                                          | Float 32                                             | Float           |
 | `float64`         | Number                                                       | Float 64                                             | Float           |
 | `date`/`_on`      | `uint` as `YYYYMMDD`                                         | `uint`                                               | _same_          |
 | `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                     | `uint`                                               | _same_          |
-| `timestamp`       | `int` Epoch `- 1,750,750,750`                                | _same_                                               | _same_          |
+| `timestamp`       | `int` Epoch                                                  | `int` Epoch `- 1,750,750,750`                        | _same_          |
 | `timespan`/`span` | `list[int,int,int]`                                          | _same_                                               | _same_          |
 | `code`            | `string` strictly `[A-Z0-9_]`                                | _same_                                               | _same_          |
 | `language`/`lang` | `code` IETF BCP-47                                           | _same_                                               | _same_          |
@@ -39,8 +39,8 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `tax`/`tax_amt`   | String: `dec`<br />+ optional space and `curr`<br />+ mandatory space + `tax_code` | `list[dec,tax_code,curr]`<br />`list[dec,tax_code]`  | _same_          |
 | `quantity`        | String: `dec`<br />+ optional space and `unit`               | `list[dec,unit]` / `dec`                             | _same_          |
 | `ip`              | String: IPv4 or IPv6 notation                                | `bytes` with 4 or 16 bytes                           | _same_          |
-| `subnet`/`net`    | String: CIDR notation                                        | `list[ip,uint]` CIDR notation                        | _same_          |
-| `coords`          | `list[dec,dec]` WGS84                                        | _same_                                               | _same_          |
+| `subnet`/`net`    | String: CIDR notation <!-- adv -->                           | `list[ip,uint]` CIDR notation                        | _same_          |
+| `coords`          | `list[dec,dec]` WGS84 <!-- adv -->                           | _same_                                               | _same_          |
 
 ### Units of measure
 
@@ -60,15 +60,15 @@ We use codes from UN/CEFACT Recommendation 20.  See full list at: [unece.org](ht
 
 ### Namespaces: Variant, Enum, Record
 
-A project or API has a root namespace, i.e. `com/example`.
+A project or API has a root namespace, dot-delimited, i.e. `com.example`.
 
-Variant, Enum and Record types need unique namespaces in plural form for API consistency purposes, for example: `com/example/orders/lines`
+Variant, Enum and Record types need unique namespaces in singular form, for example: `com.example.order.line`
 
 <!-- advanced -->
 
 Identifiers within a namespace are strings (JSON) and unsigned integers starting from 0 (CBOR/Binary, similar to Protobuf).  To avoid version conflicts, **identifiers must remain reserved forever when they are deprecated.**  Variants and Enums should have their first or all letters uppercase while record field names should begin with a lowercase letter.
 
-In CBOR/Binary, variants, enums and record fields are identified by a unique unsigned integer (similar to Protobuf), which should also be reserved forever.  For a given context (for example, a company's HTTP API), encoders should maintain a global, namespaced symbol table.  Applications calling encoder functions for these three types must provide a namespace (i.e. `com/example/order/line`) in which field names will be assigned integers starting from zero as they are first encountered.  This table must be managed centrally and shared with other endpoints (much like Protobuf IDL `.proto` files must be shared among endpoints).
+In CBOR/Binary, variants, enums and record fields are identified by a unique unsigned integer (similar to Protobuf), which should also be reserved forever.  For a given context (for example, a company's HTTP API), encoders should maintain a global, namespaced symbol table.  Applications calling encoder functions for these three types must provide a namespace (i.e. `com.example.order.line`) in which field names will be assigned integers starting from zero as they are first encountered.  This table must be managed centrally and shared with other endpoints (much like Protobuf IDL `.proto` files must be shared among endpoints).
 
 Symbol tables are simple 7-bit ASCII files listing symbols in field order and are thus strictly append-only for each namespace, to preserve field IDs forever.
 
@@ -81,20 +81,20 @@ Symbol tables are simple 7-bit ASCII files listing symbols in field order and ar
 ```
 # VOF Symbol Table
 
-com/example/orders
+com.example.order
 	id
 	customer
 	lines
 	total
 
-com/example/orders/lines
+com.example.order.line
 	i
 	product
 	qty
 	unit_price
 ```
 
-In the above example, symbol 'customer' in namespace 'com/example/orders' is ID `1`.
+In the above example, symbol 'customer' in namespace 'com.example.order' is ID `1`.
 
 ### NDArray
 
@@ -194,21 +194,21 @@ If you need to issue multiple API requests within a few seconds, HTTP/1.1 `keepa
 
 ### HTTP Response Codes
 
-| Code                        | Methods        | Notes                                     |
-| --------------------------- | -------------- | ----------------------------------------- |
-| `200 OK`                    | _all_          | Success with a response body              |
-| `201 Created`               | `POST`         | Success with a response body              |
-| `400 Bad Request`           | `GET`, `POST`  | Fatal error, don't retry this query as-is |
-| `401 Unauthorized`          | _all_          | Authentication failure                    |
-| `403 Forbidden`             | _all_          | Authentication valid but insufficient     |
-| `404 Not Found`             | `GET`, `PATCH` | Incorrect URL or non-existent ID          |
-| `423 Locked`                | _all_          | Record(s) temporarily unavailable         |
-| `429 Too Many Requests`     | _all_          | Wait and try again                        |
-| `500 Internal Server Error` | _all_          | Wait and try again                        |
-| `501 Not Implemented`       | _all_          | Fatal error, don't retry                  |
+| Code                        | Methods        | Notes                                        |
+| --------------------------- | -------------- | -------------------------------------------- |
+| `200 OK`                    | _all_          | Full success with a response body            |
+| `207 Multi-Status`          | `POST`, `PATCH` | Partial success with a response body <!-- adv --> |
+| `400 Bad Request`           | `GET`, `POST`  | Full failure, don't retry this query as-is   |
+| `401 Unauthorized`          | _all_          | Authentication failure                       |
+| `403 Forbidden`             | _all_          | Authentication valid but insufficient rights |
+| `404 Not Found`             | `GET`, `PATCH`, `DELETE` | Incorrect URL or non-existent ID   |
+| `429 Too Many Requests`     | _all_          | Wait and try again                           |
+| `500 Internal Server Error` | _all_          | Wait and try again                           |
+| `501 Not Implemented`       | _all_          | Fatal error, don't retry                     |
 
 ### Conventions
 
+* **Reference:** a record with only a primary key and, if applicable, a last modification timestamp.
 * Use `decimal` and its derivatives for financial data which requires exact precision (quantities, amounts) and `float64` for ratios and other non-financial data better suited for floating point numbers.
 * Record field types may only ever be changed for wire-compatible ones.  For example, `decimal` could become `String`, but not the other way around.
 * Generated views/reports should be declared as record types in their module, probably with a `Series` result.
@@ -220,28 +220,32 @@ If you need to issue multiple API requests within a few seconds, HTTP/1.1 `keepa
 * Field names with multiple words should go from most to least precise (i.e. prefer `item_qty` over `qty_item`)
 * Suffix non-self-describing field names to clarify their type when the value might not be obvious: `_code`, `_id`, `_amt` or `_price`, `_qty`, `_tax`
 
+
 ### GET Parameters
 
 These query string parameters are available for all `GET` requests.  In order to avoid conflicts with field names, all these parameters end with a tilde (`~`).  This also has the benefit of being visually distinctive (i.e. `max~=20` for a result limit).
 
 #### `select~`
 
-(Default: `*`.)  When only a subset of a record's fields are of interest, adding a `select~` query string parameter to any `GET` request filters them at the source.  This is a comma-delimited list of field names, which can take the following forms:
+(Default: `*`)  By default, for GET responses, records are sent with all fields present and with references to other records (i.e. order customers, order line products), and only private child records inlined (i.e. an order's lines).  This parameter allows specifying which fields to include, which record fields to inline and which to attach separately in the `$msg`.  It is a comma-delimited list of field names with some modifiers:
 
-* `*` — Include all fields at this level (required to use `!` exclusions).
-* `id` — It is never necessary to request this field explicitly, as it is always included with records.
-* `foo` — Regular field to be included.
-* `*,!foo` — All fields except `foo`.
-* `foo_id` — Reference by ID to be included.
-* `foo_id` requested as `foo` or `foo[*]` — Stripping the field's suffix requests that `foo_id` be included _and_ that the referred record be included in `Response.heap`.
-* `foo[bar,baz]` — Only include fields `id` (if any), `bar` and `baz` of dependent or referenced field `foo` or `foo_id`.
-* `*,foo[*,!bar]` — All fields, except the `bar` field of `foo`.
+* `*` — Include all fields at this level.
+* `!foo` — Exclude field `foo`, only valid after `*`.
+* `foo` — Regular field to be included (scalar, reference or inline record).
+* `foo()` or `foo(…)` — Expand `foo` referenced record inline.
+* `$foo` or `$foo(…)` — If `foo` is a reference, attach the full record in `$msg` (de-duplicated).
 
-Example: `GET …/orders?user_id=…&select~=ordered_on,grand_total,lines[qty,unit_price,product[name]]`
+<!-- adv --> The syntax is recursive, so `*,foo(bar(*,!x),baz)` means all fields, expand `foo` into its record but with only `bar` and `baz`, and exclude `x` from `bar`.
+
+Full example: `GET …/orders?user=12345&select~=id,ordered_on,grand_total,lines(qty,unit_price,product(id,name))`
+
+<!-- advanced -->
 
 #### `prune~`
 
-(Default: none.)  List of a record's fields (expected to be lists of children) to filter based on row filters.  Use `*` to mean "any applicable lists of children."
+(Default: none.)  List of a record's fields (expected to be lists of records) to filter based on query filters.  For example, restrict order lines for queries filtering on order line product types.
+
+<!-- /advanced -->
 
 #### `max~` and `page~`
 
@@ -249,14 +253,19 @@ Example: `GET …/orders?user_id=…&select~=ordered_on,grand_total,lines[qty,un
 
 #### Row Filters
 
-Use the form `<field>=[<operator>:]<value(s)>` inspired by PostgREST to filter by field value.  For example, `created_on=atleast:20250101` filters out records which were created before 2025-01-01, `id=1234` requires an ID of "1234" and `is_draft=$false` requires that `is_draft` not be truthy.  Appending '!' to a field name negates its operator, like `name!=has:Smith` selects all names _not_ including keyword "Smith".  Filters are additive (all must be met) and fields may be specified more than once.
+* Format: `field[!]=[operator:]value[,value2…]`
+* Appending '!' to a field name negates its operator, like `name!=has:Smith` selects all names which do _not_ include "Smith".
+* Filters are additive (all must be true).
+* Fields may be used more than once.
+* Record field members use '.' separators, i.e. `order.lines.qty`
+* Bare record fields match on their ID, i.e. `order.contact` implies `order.contact.id`
 
 Available operators (some with synonyms):
 
 | Operator              | Meaning                                                     |
 | --------------------- | ----------------------------------------------------------- |
-| _none_                | equals exactly                                              |
-| `lt`/`under`/`before` | field is less than                                          |
+| _none_                | equals exactly (i.e. `id=1234`)                             |
+| `lt`/`under`/`before` | field is less than (i.e. `price=lt:10`)                     |
 | `lte`/`upto`          | field is less than or equal                                 |
 | `gt`/`over`/`after`   | field is greater than                                       |
 | `gte`/`atleast`       | field is greater than or equal                              |
@@ -279,14 +288,15 @@ For example, `…/orders?prune~=lines&date=between:20250101:20251231&lines.produ
 
 A `PATCH` record is a possibly incomplete copy of an existing record with the primary key specified in the URL and/or in the record itself.  The patch version of a record has the exact same structure as the record itself (like a normal REST `PUT`), with the following additional operations available for convenience:
 
-* Omit any field to leave it unchanged
-* Set any field to `Null` to unset its value
-* In arrays of records:
-  * Unchanged: omit record entirely
-  * Add: record without primary key
-  * Edit: record with primary key and at least one other field
-  * Delete: record with only primary key
-* Other arrays are full replacements
+| Field Type  | Change         | Encoding                          |
+| ----------- | -------------- | --------------------------------- |
+| Any         | Unchanged      | Omit entirely                     |
+| Any         | Unset          | Set to `Null`                     |
+| Record list | Unchanged item | Omit entirely                     |
+| Record list | New item       | Record without ID                 |
+| Record list | Edited item    | Record with ID and changed fields |
+| Record list | Deleted item   | Reference (record with only ID)   |
+| Other lists | Any change     | Full replacement                  |
 
 ```json5
 // Example patch on a hypothetical order record
@@ -312,65 +322,44 @@ A `PATCH` record is a possibly incomplete copy of an existing record with the pr
 
 ### Standard Endpoints
 
-Unless specified otherwise, record types offer an endpoint corresponding to its namespace without the global prefix. (i.e. `com/example/orders/accounts` would be `…/orders/accounts`)  Below, `{path}` represents this path (i.e. `orders/accounts`) and `{Record}` the main record type (i.e. "Order").  Some child-only types (i.e. order lines) don't necessarily have endpoints.
+Unless specified otherwise, record types offer an endpoint corresponding to its namespace without the global prefix, in plural form and with forward slash separators. (i.e. `com.example.order.account` would be endpoint `…/orders/accounts`)  Below, `{path}` represents this path (i.e. `orders/accounts`) and `{Record}` the main record type (i.e. "Order").  Some child-only types (i.e. order lines) don't necessarily have endpoints.
 
-Ping endpoint: `GET …/` should return a Response with `status` set to "success".
+Ping endpoint: `GET …/` should return a `$msg` with `text` set to `"Pong!"`.
 
 Simple endpoints:
 
-| Endpoint                    | Request               | Response fields                |
-| --------------------------- | --------------------- | ------------------------------ |
-| `GET …/{path}/{id}`         | -                     | `heap` with exactly one record |
-| `GET …/{path}[?…]`          | -                     | `heap` with records            |
-| `POST …/{path}`             | `{Record}` without ID (new) | `affected`               |
-| `PATCH …/{path}`            | `{Record}` with ID (existing) | `affected`, `ignored` optional |
-| `DELETE …/{path}/{id1}[,…]` | -                     | `affected`, `ignored` optional |
+| Endpoint                    | Request body          | Response `$msg` fields              |
+| --------------------------- | --------------------- | ----------------------------------- |
+| `GET …/{path}/{id}`         | -                     | One record in the type's field      |
+| `GET …/{path}[?…]`          | -                     | Many records in the type's field    |
+| `POST …/{path}`             | `{Record}` without ID (new) | One ref in the type's field   |
+| `PATCH …/{path}`            | `{Record}` with ID (existing) | One ref in the type's field |
+| `DELETE …/{path}/{id1}[,…]` | -                     | If any failed: none deleted and `text` set |
+
+<!-- advanced -->
 
 Multiplexed endpoints are on the root path, which is reserved for protocol-level use:
 
-| Endpoint   | Request                               | Response fields       |
-| ---------- | ------------------------------------- | --------------------- |
-| `POST …/`  | `Heap` of records without IDs (new)   | `affected`            |
-| `PATCH …/` | `Heap` of patches with IDs (existing) | `affected`, `ignored` |
+| Endpoint   | Request body                       | Response `$msg` fields               |
+| ---------- | ---------------------------------- | ------------------------------------ |
+| `POST …/`  | `$msg` records without IDs (new)   | References in affected types' fields |
+| `PATCH …/` | `$msg` patches with IDs (existing) | References in affected types' fields |
 
-When clients POST/PATCH, they should collect records and all their descendants recursively.  Records with old or no modified time should be added as references, dependent and recent records should be included in full.  If the server is missing information to complete the request, the `Response` status should be "partial" or "failed" and the missing records detailed in `ignored` so the client may add the records to their heap and try again.
+Clients should collect records and all their descendants recursively in a single request.  Records with old or no modified time field should be added as references, dependent and recent records should be included in full.  On HTTP 200, response references confirm the records which have been created/updated.  On HTTP 207, no action has been taken and references are for records which need to be added in full to the client's request in order to succeed.
 
-#### Ref
+<!-- /advanced -->
 
-Qualified reference to a record.  Typically contains a primary key ID and optionally a modification time for sync and/or a message for error reporting (i.e. in a failed/partial `Response` it could explain why one failed).  This is a root-level namespace in a project, i.e. `com/example/ref`.  A project should define a single scalar type for record identity (typically `uint` or `String`) used across all record types, being a surrogate if necessary to internal composite keys.  For example, it could be:
+### Message `$msg`
 
-| Field           | Type                 | Notes                       |
-| --------------- | -------------------- | --------------------------- |
-| `id`            | `uint`               |                             |
-| `last_modified` | `timestamp` optional | Last modification timestamp |
-| `why`           | `String` optional    | Why the record failed       |
+Every HTTP response is a `$msg` record, which consists of a few meta-data fields plus one list field per record type in the project.  This is a root-level namespace, like `com.example.$msg`.
 
-#### Heap
-
-Collection of records and references, thus with 2 fields for each major structure type of a project.  This is a root-level namespace in a project, like `com/example/heap`, structured as:
-
-| Field           | Type              |
-| --------------- | ----------------- |
-| `orders`        | `Array<Order>`    |
-| `ref_orders`    | `Array<Ref>`      |
-| `products`      | `Array<Product>`  |
-| `ref_products`  | `Array<Ref>`      |
-| ...             | ...               |
-
-### Response
-
-Standard structure returned with every HTTP response.  It consists of standard fields, plus one per major structure type.  This is a root-level namespace in a project, like `com/example/response`, structured as:
-
-| Field       | Type                   | Notes                                                        |
-| ----------- | ---------------------- | ------------------------------------------------------------ |
-| `status`    | `String`               | One of: "success", "partial", "failed"                       |
-| `error`     | `String` optional      |                                                              |
-| `affected`  | `Heap` optional        | Records which were processed successfully                    |
-| `ignored`   | `Heap` optional        | Explanations included for records which couldn't be processed |
-| `heap`      | `Heap` optional        | Records referenced by the main record or list                |
-| `remaining` | `uint` optional        | If the current result set is limited, how many items follow |
-| `orders`    | `OrderResponse`        | Additional fields specific to responses from the Order module(s) |
-| ...         | ...                    |                                                                  |
+| Field          | Type                | Notes                                                         |
+| -------------- | ------------------- | ------------------------------------------------------------- |
+| `text`         | `String` optional   | Status details, error explanations                            |
+| `remaining`    | `uint` optional     | If the current result set is limited, how many items follow   |
+| `orders`       | `Order list`        | Records of an example `Order` type                            |
+| `orders_sales` | `Order/Sales list`  | Hypothetical sales report rows                                |
+| ...            | ...                 |                                                               |
 
 ## Implementation Considerations
 
