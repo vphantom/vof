@@ -112,13 +112,13 @@ Compact representation of a list of `record` where all the same fields are defin
 
 ### Decimal
 
-Necessary for financial data.  In JSON, it must be a String to bypass possible float conversions done by some libraries.
+Necessary for financial data.  In JSON, it must be a string to bypass possible float conversions done by some libraries.
 
 <!-- adv --> In CBOR/Binary, this is passed to the encoder as a signed integer left-shifted 3 bits to add a 3-bit value representing 0, 1, 2, 3, 4, 5, 6 or 9 decimal places.  For example, -2.135 would be `(-2135 << 3) + 3 = -17083`.
 
 ### Date
 
-Calendar date, sortable.  Time zone is outside the scope of this type, derived from context as necessary.  In JSON, a human-friendly `YYYYMMDD` number is used.
+Calendar date, sortable.  Time zone is outside the scope of this type, derived from context as necessary.  In JSON, a human-friendly `YYYYMMDD` number is used to avoid using strings.
 
 <!-- advanced -->
 
@@ -132,7 +132,7 @@ In CBOR/Binary, it is structured in 17 bits as `(year << 9) + (month << 5) + day
 
 ### Datetime
 
-Extends `date` with wall clock time, still sortable and with implicit time zone.  In JSON, a human-friendly `YYYYMMDDHHMM` number is used.
+Extends `date` with wall clock time, still sortable and with implicit time zone.  In JSON, a human-friendly `YYYYMMDDHHMM` number is used to avoid using stings.
 
 <!-- advanced -->
 
@@ -208,15 +208,12 @@ If you need to issue multiple API requests within a few seconds, HTTP/1.1 `keepa
 
 ### Conventions
 
-* **Reference:** a record with only a primary key and, if applicable, a last modification timestamp.
+* **Reference:** a record with only a primary key and, if applicable, a last modification timestamp.  Where there may be a `foo_id` field in storage, in VOF APIs a `foo` reference field is preferable, as it is interchangeable with an inline instance without type ambiguity.
 * Use `decimal` and its derivatives for financial data which requires exact precision (quantities, amounts) and `float64` for ratios and other non-financial data better suited for floating point numbers.
-* Record field types may only ever be changed for wire-compatible ones.  For example, `decimal` could become `String`, but not the other way around.
+* Record field types may only ever be changed for wire-compatible ones.  For example, `decimal` could become `string`, but not the other way around.
 * Generated views/reports should be declared as record types in their module, probably with a `Series` result.
 * Variant/Enum/Record use `Capitalized` names.  Dependent records are namespaced in their parent, i.e. `Order.Line` used by `Order`.
 * Fields use `snake_case`.  Pluralize lists (i.e. `lines`)
-* When naming fields referring to other record types:
-  * Use `foo(s)` when embedding instances
-  * Use `foo_id(s)` when referring by ID
 * Field names with multiple words should go from most to least precise (i.e. prefer `item_qty` over `qty_item`)
 * Suffix non-self-describing field names to clarify their type when the value might not be obvious: `_code`, `_id`, `_amt` or `_price`, `_qty`, `_tax`
 
@@ -243,7 +240,9 @@ Full example: `GET …/orders?user=12345&select~=id,ordered_on,grand_total,lines
 
 #### `prune~`
 
-(Default: none.)  List of a record's fields (expected to be lists of records) to filter based on query filters.  For example, restrict order lines for queries filtering on order line product types.
+(Default: none.)  List of a record's fields (expected to be lists of records) to filter based on query filters.  For example, it could be desirable to restrict order lines in each returned order for a query filtering on order line product types.
+
+For example, `…/orders?prune~=lines&is_draft=$false&date=between:20250101:20251231&lines.product=in(ABC,DEF)` would return final orders placed in 2025 which have lines about products ABC or DEF, but each order would only include lines about products ABC or DEF.
 
 <!-- /advanced -->
 
@@ -258,31 +257,31 @@ Full example: `GET …/orders?user=12345&select~=id,ordered_on,grand_total,lines
 * Filters are additive (all must be true).
 * Fields may be used more than once.
 * Record field members use '.' separators, i.e. `order.lines.qty`
-* Bare record fields match on their ID, i.e. `order.contact` implies `order.contact.id`
+* Bare record fields match on their primary key, i.e. `order.contact` implies `order.contact.id`
 
 Available operators (some with synonyms):
 
-| Operator              | Meaning                                                     |
-| --------------------- | ----------------------------------------------------------- |
-| _none_                | equals exactly (i.e. `id=1234`)                             |
-| `lt`/`under`/`before` | field is less than (i.e. `price=lt:10`)                     |
-| `lte`/`upto`          | field is less than or equal                                 |
-| `gt`/`over`/`after`   | field is greater than                                       |
-| `gte`/`atleast`       | field is greater than or equal                              |
-| `between`             | inclusive, i.e. `created_on=between:20250101:20251231`      |
-| `has`                 | string contains keyword                                     |
-| `in(…)`               | exactly one of these values, i.e. `categ_id=in:123:234:345` |
+| Operator              | Meaning                                                  |
+| --------------------- | -------------------------------------------------------- |
+| _none_                | equals exactly (i.e. `id=1234`)                          |
+| `lt`/`under`/`before` | field is less than (i.e. `price=lt:10`)                  |
+| `lte`/`upto`          | field is less than or equal                              |
+| `gt`/`over`/`after`   | field is greater than                                    |
+| `gte`/`atleast`       | field is greater than or equal                           |
+| `between`             | inclusive, i.e. `created_on=between:20250101:20251231`   |
+| `has`                 | string contains keyword                                  |
+| `in(…)`               | exactly one of these values, i.e. `categ=in:123:234:345` |
 
-Special values:
+Special values are prefixed with `'$'` and could include:
 
-| Value    | Meaning                                                  |
-| -------- | -------------------------------------------------------- |
-| `$true`  | truthy value (`true`, non-zero number, non-empty string) |
-| `$false` | falsey value (`false`, zero, empty string)               |
+| Value        | Meaning                                                    |
+| ------------ | ---------------------------------------------------------- |
+| `$false`     | `Null`, `false`, `"0"`, number 0, empty string, empty list |
+| `$true`      | Any non-false value                                        |
+| `$today`     | current date in the field's timezone                       |
+| `$now`       | current datetime in the field's timezone                   |
 
-Using filters on children implies that parents without any matching children will not be included.  By default, all children of included parents are included, unless specified in `prune~`.
-
-For example, `…/orders?prune~=lines&date=between:20250101:20251231&lines.product=in(ABC,DEF)` would return orders placed in 2025 which have lines about products ABC or DEF, but each order would only incude lines about products ABC or DEF.
+Using filters on children implies that parents without any matching children will not be included.  By default, all direct children of included parents (i.e. order lines) are included.
 
 ### PATCH Updates
 
@@ -291,7 +290,7 @@ A `PATCH` record is a possibly incomplete copy of an existing record with the pr
 | Field Type  | Change         | Encoding                          |
 | ----------- | -------------- | --------------------------------- |
 | Any         | Unchanged      | Omit entirely                     |
-| Any         | Unset          | Set to `Null`                     |
+| Any         | Unset          | Set to `Null` explicitly          |
 | Record list | Unchanged item | Omit entirely                     |
 | Record list | New item       | Record without ID                 |
 | Record list | Edited item    | Record with ID and changed fields |
@@ -328,13 +327,13 @@ Ping endpoint: `GET …/` should return a `$msg` with `text` set to `"Pong!"`.
 
 Simple endpoints:
 
-| Endpoint                    | Request body          | Response `$msg` fields              |
-| --------------------------- | --------------------- | ----------------------------------- |
-| `GET …/{path}/{id}`         | -                     | One record in the type's field      |
-| `GET …/{path}[?…]`          | -                     | Many records in the type's field    |
-| `POST …/{path}`             | `{Record}` without ID (new) | One ref in the type's field   |
-| `PATCH …/{path}`            | `{Record}` with ID (existing) | One ref in the type's field |
-| `DELETE …/{path}/{id1}[,…]` | -                     | If any failed: none deleted and `text` set |
+| Endpoint                    | Request body                  | Response `$msg` fields                  |
+| --------------------------- | ----------------------------- | --------------------------------------- |
+| `GET …/{path}/{id}`         | -                             | One record in the type's field          |
+| `GET …/{path}[?…]`          | -                             | Many records in the type's field        |
+| `POST …/{path}`             | `{Record}` without ID (new)   | One ref in the type's field             |
+| `PATCH …/{path}`            | `{Record}` with ID (existing) | One ref in the type's field             |
+| `DELETE …/{path}/{id1}[,…]` | -                             | If any failed: none deleted, `text` set |
 
 <!-- advanced -->
 
@@ -353,13 +352,13 @@ Clients should collect records and all their descendants recursively in a single
 
 Every HTTP response is a `$msg` record, which consists of a few meta-data fields plus one list field per record type in the project.  This is a root-level namespace, like `com.example.$msg`.
 
-| Field          | Type                | Notes                                                         |
-| -------------- | ------------------- | ------------------------------------------------------------- |
-| `text`         | `String` optional   | Status details, error explanations                            |
-| `remaining`    | `uint` optional     | If the current result set is limited, how many items follow   |
-| `orders`       | `Order list`        | Records of an example `Order` type                            |
-| `orders_sales` | `Order/Sales list`  | Hypothetical sales report rows                                |
-| ...            | ...                 |                                                               |
+| Field          | Type                | Notes                                                       |
+| -------------- | ------------------- | ----------------------------------------------------------- |
+| `text`         | `string` optional   | Status details, error explanations                          |
+| `remaining`    | `uint` optional     | If the current result set is limited, how many items follow |
+| `orders`       | `Order list`        | Records of an example `Order` type                          |
+| `orders_sales` | `Order/Sales list`  | Hypothetical sales report rows                              |
+| ...            | ...                 |                                                             |
 
 ## Implementation Considerations
 
