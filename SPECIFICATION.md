@@ -10,7 +10,8 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `bool`            | Boolean                                                      | False: Int 0 / True: Int 1                           | False, True     |
 | `list`            | Array                                                        | List(0..8) + 0..8 vals<br />List Open + vals + Close | Array           |
 | `ndarray`         | Array (nested) <!-- adv -->                                  | `list[[sizes…], values…]`                            | _same_          |
-| `map`             | Object                                                       | `list` alternating keys and values                   | Map             |
+| `intmap`          | Object                                                       | `list` alternating keys and values                   | Map             |
+| `strmap`          | Object                                                       | `list` alternating keys and values                   | Map             |
 | `variant`/`enum`  | Array[String,values…] / String                               | `list[Int,values…]` / `Int`                          | _same_          |
 | `record`          | Object (keys: names)                                         | S.Open + groups…                                     | Map (keys: IDs) |
 | `series`          | 2D Array (row 0: names)                                      | `list[[IDs…], values…]`                              | _same_          |
@@ -22,7 +23,7 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `ratio`           | String: optional `-` + digits + `/` + digits                 | `list[int,uint]`                                     | _same_          |
 | `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")              | `dec` rebased to 1 (i.e. 50% is 0.5)                 | _same_          |
 | `float32`         | Number <!-- adv -->                                          | Float 32                                             | Float           |
-| `float64`         | Number                                                       | Float 64                                             | Float           |
+| `float`/`float64` | Number                                                       | Float 64                                             | Float           |
 | `date`/`_on`      | `uint` as `YYYYMMDD`                                         | `uint`                                               | _same_          |
 | `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                     | `uint`                                               | _same_          |
 | `timestamp`       | `int` Epoch                                                  | `int` Epoch `- 1,750,750,750`                        | _same_          |
@@ -30,17 +31,17 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `code`            | `string` strictly `[A-Z0-9_]`                                | _same_                                               | _same_          |
 | `language`/`lang` | `code` IETF BCP-47                                           | _same_                                               | _same_          |
 | `country`/`cntry` | `code` ISO 3166-1 alpha-2                                    | _same_                                               | _same_          |
-| `region`/`rgn`    | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)         | _same_                                               | _same_          |
+| `subdivision`     | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)         | _same_                                               | _same_          |
 | `currency`/`curr` | `code` ISO 4217 alpha-3                                      | _same_                                               | _same_          |
 | `tax_code`        | `code` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym     | _same_                                               | _same_          |
 | `unit`            | `code` UN/CEFACT Rec. 20                                     | _same_                                               | _same_          |
-| `text`            | `map` of `lang,string` pairs<br />`string` for just one      | _same_                                               | _same_          |
+| `text`            | `strmap` of `lang,string` pairs<br />`string` for just one   | _same_                                               | _same_          |
 | `amount`/`price`  | String: `dec`<br />+ optional space and `curr`               | `list[dec,curr]` / `dec`                             | _same_          |
 | `tax`/`tax_amt`   | String: `dec`<br />+ optional space and `curr`<br />+ mandatory space + `tax_code` | `list[dec,tax_code,curr]`<br />`list[dec,tax_code]`  | _same_          |
 | `quantity`        | String: `dec`<br />+ optional space and `unit`               | `list[dec,unit]` / `dec`                             | _same_          |
 | `ip`              | String: IPv4 or IPv6 notation                                | `bytes` with 4 or 16 bytes                           | _same_          |
 | `subnet`/`net`    | String: CIDR notation <!-- adv -->                           | `list[ip,uint]` CIDR notation                        | _same_          |
-| `coords`          | `list[dec,dec]` WGS84 <!-- adv -->                           | _same_                                               | _same_          |
+| `coords`          | `list[float,float]` WGS84 <!-- adv -->                       | _same_                                               | _same_          |
 
 ### Units of measure
 
@@ -171,13 +172,13 @@ The canonical encoding is to use the bare `string` form when a single language i
 ## CBOR Encoding
 
 * The regular MIME type (`application/cbor`) for CBOR encoded transfers is recommended.
-* When possible, Maps should be sorted by ascending key when buffering the whole list is possible, to facilitate compression.  This is usually done by using a CBOR encoder in deterministic "canonical" mode, but some implementations may require applications to pass sorted lists to encoders to achieve this manually.
+* When possible, maps should be sorted by ascending key when buffering the whole list is possible, to facilitate compression.  This is usually done by using a CBOR encoder in deterministic "canonical" mode, but some implementations may require applications to pass sorted lists to encoders to achieve this manually.
 * You may begin a stream with CBOR's magic, tag 55799.  No other tags should be used.
 
 ## Binary Encoding
 
 * The suggested MIME type for binary encoded transfers is `application/x-vanilla-object`.  The suggested file name extension is `.vo`.
-* When possible, Maps should be sorted by ascending key when buffering the whole list is possible, to facilitate compression.
+* When possible, maps should be sorted by ascending key when buffering the whole list is possible, to facilitate compression.
 * You may begin a stream with VOF Binary's magic, tag 5505 applied to integer 79, which encodes to `0xFF81564F`.
 
 <!-- /advanced -->

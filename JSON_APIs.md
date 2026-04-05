@@ -9,7 +9,8 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `null`            | Null                                                         |
 | `bool`            | Boolean                                                      |
 | `list`            | Array                                                        |
-| `map`             | Object                                                       |
+| `intmap`          | Object                                                       |
+| `strmap`          | Object                                                       |
 | `variant`/`enum`  | Array[String,values…] / String                               |
 | `record`          | Object (keys: names)                                         |
 | `series`          | 2D Array (row 0: names)                                      |
@@ -20,7 +21,7 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits |
 | `ratio`           | String: optional `-` + digits + `/` + digits                 |
 | `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")              |
-| `float64`         | Number                                                       |
+| `float`/`float64` | Number                                                       |
 | `date`/`_on`      | `uint` as `YYYYMMDD`                                         |
 | `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                     |
 | `timestamp`       | `int` Epoch                                                  |
@@ -28,11 +29,11 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `code`            | `string` strictly `[A-Z0-9_]`                                |
 | `language`/`lang` | `code` IETF BCP-47                                           |
 | `country`/`cntry` | `code` ISO 3166-1 alpha-2                                    |
-| `region`/`rgn`    | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)         |
+| `subdivision`     | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)         |
 | `currency`/`curr` | `code` ISO 4217 alpha-3                                      |
 | `tax_code`        | `code` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym     |
 | `unit`            | `code` UN/CEFACT Rec. 20                                     |
-| `text`            | `map` of `lang,string` pairs<br />`string` for just one      |
+| `text`            | `strmap` of `lang,string` pairs<br />`string` for just one   |
 | `amount`/`price`  | String: `dec`<br />+ optional space and `curr`               |
 | `tax`/`tax_amt`   | String: `dec`<br />+ optional space and `curr`<br />+ mandatory space + `tax_code` |
 | `quantity`        | String: `dec`<br />+ optional space and `unit`               |
