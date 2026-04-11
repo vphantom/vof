@@ -1,8 +1,6 @@
 version = 0.27.0
 profile = default
 
-# Options which differ from this version-profile pair:
-
 # TODO: let-binding-deindent-fun
 assignment-operator=end-line
 break-cases=fit-or-vertical
@@ -28,46 +26,3 @@ parse-docstrings=true
 sequence-blank-line=compact
 stritem-extension-indent=2
 wrap-comments=true
-
-# Options which match our needs:
-
-# break-before-in=fit-or-vertical
-# break-collection-expressions=fit-or-vertical
-# break-colon=after
-# break-fun-decl=wrap
-# break-infix-before-func=false
-# break-separators=after
-# break-string-literals=auto
-# break-struct=force
-# cases-matching-exp-indent=normal
-# comment-check=true
-# disambiguate-non-breaking-match=false
-# dock-collection-brackets=true
-# exp-grouping=parens
-# extension-indent=2
-# function-indent-nested=never
-# function-indent=2
-# indent-after-in=0
-# indicate-nested-or-patterns=unsafe-no
-# leading-nested-match-parens=false
-# let-binding-indent=2
-# line-endings=lf
-# margin-check=false
-# margin=80
-# match-indent-nested=never
-# match-indent=0
-# max-iters=10
-# module-item-spacing=compact
-# nested-match=wrap
-# ocp-indent-compat=false
-# parens-tuple-patterns=multi-line-only
-# parse-toplevel-phrases=false
-# sequence-style=terminator
-# single-case=compact
-# space-around-arrays=true
-# space-around-lists=true
-# space-around-records=true
-# space-around-variants=true
-# type-decl-indent=2
-# type-decl=compact
-# wrap-fun-args=true

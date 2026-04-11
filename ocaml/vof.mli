@@ -11,6 +11,27 @@
       val of_vof : ?base:t -> Vof.value -> (t, error) result
     ]} *)
 
+(** {1 Contexts} *)
+
+(** Context for the current company/API. *)
+type context
+
+(** [make_context ?path ()] creates a new context. If [?path] is specified, a
+    symbol namespace will be loaded from that path.  If [?update] is true, the
+    file will be created if missing and updated if incomplete as record fields
+    and enum/variant symbols are encountered. *)
+val make_context : unit -> context
+
+(** {1 Sources} *)
+
+(** Mutable source of VOF values. *)
+type source
+
+(** [make_source ctx] creates a new source within [ctx]. *)
+val make_source : context -> source
+(* FIXME: what will those actually be? a variant between a Yojson tree, a CBOR
+   one or a primitive VOF Binary one? *)
+
 (** {1 Data Types} *)
 
 module StringMap : Map.S with type key = string
@@ -28,8 +49,10 @@ module Ratio : sig
   val to_string : t -> string
 end
 
-(** Mutable source of VOF values. *)
-type source
+type record = [ `Record of namespace * t StringMap.t ]
+
+(** Namespace for compact binary encodings (Enum, Variant, Record). *)
+type namespace = string
 
 (** Single value *)
 type t = [
@@ -40,6 +63,8 @@ type t = [
   | `Float of float
   | `String of string
   | `Data of bytes
+  | `Enum of namespace * string
+  | `Variant of namespace * string * t list
   | `Decimal of Decimal.t
   | `Ratio of Ratio.t
   | `Percent of Decimal.t
@@ -55,7 +80,7 @@ type t = [
   | `Tax_code of string
   | `Unit of string
   | `Text of string StringMap.t
-  | `Amount of int * int * string option
+  | `Amount of Decimal.t * string option
   | `Tax of Decimal.t * string option * string option
   | `Quantity of Decimal.t * string option
   | `Ip of bytes
@@ -64,9 +89,10 @@ type t = [
   | `Strmap of t StringMap.t
   | `Intmap of t IntMap.t
   | `List of t list
+  | `Ndarray of int list * t list
+  | record
+  | `Series of record list
 ] [@@ocamlformat "disable"]
-
-(* TODO: Variant, Enum, Record, Series, Ndarray *)
 
 (** [diff a b] returns the API PATCH to apply to [a] to obtain [b]. Raises
     [Invalid_argument] if [a] or [b] are not record types. *)

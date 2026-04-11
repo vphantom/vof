@@ -293,7 +293,7 @@ A `PATCH` record is a possibly incomplete copy of an existing record with the pr
 | Any         | Unchanged      | Omit entirely                     |
 | Any         | Unset          | Set to `Null` explicitly          |
 | Record list | Unchanged item | Omit entirely                     |
-| Record list | New item       | Record without ID                 |
+| Record list | New item       | Record without ID or with new ID  |
 | Record list | Edited item    | Record with ID and changed fields |
 | Record list | Deleted item   | Reference (record with only ID)   |
 | Other lists | Any change     | Full replacement                  |

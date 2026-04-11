@@ -3,8 +3,8 @@
 OCaml reference implementation of VOF data types and convenience utilities.  This module provides:
 
 * A polymorphic variant matching the rich data types of VOF;
-* Scalar types compatible with `Yojson.Basic.t`;
-* Encoding and decoding in JSON using `Yojson.Basic.t`;
+* Simple scalar types a compatible subset of `Yojson.Basic.t`;
+* JSON encoding to/from `Yojson.Basic.t` without explicit dependency;
 * Diff to create PATCH records;
 * Cache to help with encoding efficiency;
 * Typed decoding helper functions.
@@ -14,4 +14,12 @@ As of this version, the final encoding and decoding is left to the caller and th
 * `base64`
 * `ipaddr`
 
-CBOR and binary support are not yet implemented.
+## Implementation Notes
+
+* We use native `int` integers, which means that we cannot I/O full 64-bit.  Good compromise for business applications, not for things like IPv4 or truncated UUID values.
+* We use options for error management, since it's impractical to refer to locations of errors in source data.
+
+## Known Limitations
+
+* CBOR Enum, Variant, Record and Series I/O is not yet implemented
+* Binary I/O is not yet implemented
