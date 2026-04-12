@@ -4,13 +4,13 @@
 
 <!-- [![GitHub release](https://img.shields.io/github/release/vphantom/vof.svg?style=plastic)]() -->
 
-VOF is an API design, type system and serialization specification.  It fills my need to facilitate interoperability between JSON, CBOR, Protocol Buffers and SQLite for business applications.  The types can be serialized in three formats:
+VOF is an API design, type system and serialization specification.  It fills my need to facilitate interoperability between JSON, CBOR, Protocol Buffers and SQLite for business applications.  The VOF types can be serialized in three formats:
 
 * **JSON** — Human-readable, fairly self-documenting but verbose
 * **CBOR** — Very compact using CBOR as a low-level format
-* **VOF Binary** — Most compact but custom encoding
+* **VOF Binary** — Most compact but fully custom encoding (overkill for most applications)
 
-All three formats can be transacted as-is or with Gzip or Zstd compression.
+All three formats can be used as-is or with Gzip or Zstd compression.
 
 Design goals:
 
@@ -42,7 +42,7 @@ To help with schema evolution, VOF specifies namespace files to be shared betwee
 
 ### Specification Status
 
-Release Candidate 9 - 2026-03-24
+Release Candidate 10 - 2026-04-12
 
 ## ROADMAP
 

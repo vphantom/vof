@@ -4,34 +4,36 @@ A VOF Binary chunk is a stream of control values, each sometimes followed by dat
 
 Decoders encountering impossible input (including invalid UTF-8 in `string` data) should discard the entire chunk and return an appropriate error.
 
+**WARNING:** This specification is currently under review.  The Record type may be removed before this format is finalized.
+
 ## Control Values
 
 Small integers are compressed at the slight expense of larger ones similarly to the Prefix Varint format (itself a variation on LEB128 and VLQ but eliminating loops, most shifts and representing 64 bits in 9 bytes instead of 10).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Illustrated here from the decoder point of view, we see that very little computing is involved:
 
-| Byte (`c`) | Type               | Condition | Description / Operation                           |
-| ---------- | ------------------ | --------- | ------------------------------------------------- |
-| `0_______` | Int 7-bit          | `< 128`   | `c`                                               |
-| `10______` | Int 14-bit         | `< 192`   | `(next_byte() << 6) + c - 128`                    |
-| `110_____` | Int 21-bit         | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`               |
-| `111000__` | Int 26-bit         | `< 228`   | `(next_bytes_le(3) << 2) + c - 224`               |
-|            | Int 32,40,48,56,64 | `< 233`   | Next 4,5,6,7,8 bytes are int Little Endian        |
-|            | Float 32,64        | `< 235`   | Next 4,8 bytes are IEEE 754 Little Endian         |
-|            | Null               | `== 235`  |                                                   |
-|            | String             | `== 236`  | Next is size in bytes, then as many UTF-8 bytes   |
-|            | Record Open        | `== 237`  | Open (groups until Record Close)                  |
-|            | List Open          | `== 238`  | Values until `List Close`                         |
-|            | Close              | `== 239`  | Close nearest `List Open`                         |
-|            | List               | `< 249`   | Exactly 0..8 items (no Close)                     |
-|            | Data               | `== 249`  | Next is size in bytes, then as many raw bytes     |
-|            | _reserved_         | `< 255`   | Next is size in bytes, then as many raw bytes     |
-|            | Tag                |           | Next value is Int qualifier, then qualified value |
+| Byte (`c`) | Type               | Condition | Description / Operation                         |
+| ---------- | ------------------ | --------- | ----------------------------------------------- |
+| `0_______` | Int 7-bit          | `< 128`   | `c`                                             |
+| `10______` | Int 14-bit         | `< 192`   | `(next_byte() << 6) + c - 128`                  |
+| `110_____` | Int 21-bit         | `< 224`   | `(next_bytes_le(2) << 5) + c - 192`             |
+| `11100___` | Int 27-bit         | `< 232`   | `(next_bytes_le(3) << 2) + c - 224`             |
+|            | Int 32,40,48,56,64 | `< 237`   | Next 4,5,6,7,8 bytes are int Little Endian      |
+|            | Float 16,32,64     | `< 240`   | Next 2,4,8 bytes are IEEE 754 Little Endian     |
+|            | List               | `< 249`   | Exactly `c - 240` values (no Close)             |
+|            | List Open          | `== 249`  | Values until `List Close`                       |
+|            | Close              | `== 250`  | Close nearest `List Open`                       |
+|            | Record Open        | `== 251`  | Open (groups until Record Close)                |
+|            | String             | `== 252`  | Next is size in bytes, then as many UTF-8 bytes |
+|            | Data               | `== 253`  | Next is size in bytes, then as many raw bytes   |
+|            | Alt                | `== 254`  | Next value is in its alternate form             |
+|            | Null               |           |                                                 |
 
 ### Canonical Encoding
 
 * Integers and `decimal` must be encoded in the smallest form possible.  For example, 1.1 should only be "11 with 1 decimal place."
 * Floating point numbers must be represented in the smallest form which does not lose precision.  Note that `-0.0` and `+0.0` are _not_ considered equivalent, however all `NaN` bit patterns are considered equal.  When converting between precisions, denormalized numbers should be normalized if the target precision can represent the exact value as a normal number.  This ensures minimal representation while maintaining precision.
 * Lists of 0..8 items must be encoded with the short forms 240..248.
-* Tags should not be used unless strictly necessary.
+* Maps are lists of alternating keys and values.
+* Boolean values are integers 0 for False and 1 for True.
 
 ### Negative Integers
 
@@ -55,21 +57,7 @@ Example selector bytes:
 * `11110000` — more groups follow, fields +0, +1 follow, +2, +3, +4, +5 are omitted
 * `01100001` — last group, fields +0 and +5 follow, while +1, +2, +3, +4 are omitted
 
-### Tagged Values
-
-Tags 0..63 are available for applications to define their own types from our basic types and 64+ are reserved.  For example, a user-defined "URL" type could be decided as Tag 0 followed by a `string`.  Obviously, this means that such tags may have completely different meanings across different applications, so their use makes the resulting data non-portable.  Decoders should fail when presented with unknown tags.
-
-In JSON intended to be compatible with VOF Binary, tags are represented as objects with a single member whose key is a string starting with "@" followed by a number 0..63, with the value being the tagged value. For example, a user-defined "URL" type could be designed as `{"@0": "https://example.com"}`.
-
-In CBOR intended to be compatible with VOF Binary, tag use may conflict with CBOR's own tag number allocations.
-
-Future versions of VOF may reserve tags 64+ for our defined data types (i.e. `bool`, `string`, `datetime`) for situations where additional type clarity is required in encoded data.
-
 ## Implementation Considerations
-
-### Reserved Types
-
-The reserved control values are predetermined to use the same structure as `Data`: an unsigned number of bytes follows, and then as many bytes as specified.  This makes room for future types such as large integers or floats while guaranteeing that older decoders can safely skip over such unknown value types.
 
 ### Maps
 
@@ -86,9 +74,3 @@ Implementations should consider reasonable limits on:
 * Time to wait between values and/or overall rate limiting
 
 Decoded data (and thus string) sizes must be checked for overflow: a corrupt or malicious size could extend well beyond the input.
-
-## Design Compromises
-
-* Types: `float16` was omitted because it was deemed too rare.
-* ZigZag negative integer encoding was chosen because it is both simpler to implement and slightly more compact than dedicating a distinct bit for the sign, which would allow for a redundant `-0` value.
-* The `collection` type was favored vs low-level byte offset references for simplicity.
