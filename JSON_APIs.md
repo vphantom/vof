@@ -2,42 +2,42 @@
 
 ## Data Types
 
-These are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.  As such, types such as decimal and coordinates do not use explicit tags in the CBOR encoding, favoring compactness.  See `BINARY.md` for details of VOF's own binary encoding and advanced semantic tag use.
+These are standard (to be preferred to alternatives) but optional (implemented as needed).  They are not distinguished explicitly on the wire: applications agree out-of-band about when to use what, much like Protobuf, Thrift, etc.  As such, types such as decimal and coordinates do not use explicit tags in the CBOR encoding, favoring compactness.  See `BINARY.md` for details of VOF's own binary encoding proposed as slightly more compact than CBOR.
 
-| Type Names        | JSON                                                         |
-| ----------------- | ------------------------------------------------------------ |
-| `null`            | Null                                                         |
-| `bool`            | Boolean                                                      |
-| `list`            | Array                                                        |
-| `intmap`          | Object                                                       |
-| `strmap`          | Object                                                       |
-| `variant`/`enum`  | Array[String,values…] / String                               |
-| `record`          | Object (keys: names)                                         |
-| `series`          | 2D Array (row 0: names)                                      |
-| `string`          | String (necessarily UTF-8)                                   |
-| `bytes`/`data`    | String base-64 URL encoded                                   |
-| `uint`            | Number / String if outside MIN/MAX for float64               |
-| `int`/`sint`      | Number / String if outside MIN/MAX for float64               |
+| Type Names        | JSON                                                          |
+| ----------------- | ------------------------------------------------------------- |
+| `null`            | Null                                                          |
+| `bool`            | Boolean                                                       |
+| `list`            | Array                                                         |
+| `intmap`          | Object                                                        |
+| `strmap`          | Object                                                        |
+| `variant`/`enum`  | Array[String,values…] / String                                |
+| `record`          | Object (keys: names)                                          |
+| `series`          | 2D Array (row 0: names)                                       |
+| `string`          | String (necessarily UTF-8)                                    |
+| `bytes`/`data`    | String base-64 URL encoded                                    |
+| `uint`            | Number / String if outside MIN/MAX for float64                |
+| `int`/`sint`      | Number / String if outside MIN/MAX for float64                |
 | `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits |
-| `ratio`           | String: optional `-` + digits + `/` + digits                 |
-| `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")              |
-| `float`/`float64` | Number                                                       |
-| `date`/`_on`      | `uint` as `YYYYMMDD`                                         |
-| `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                     |
-| `timestamp`       | `int` Epoch                                                  |
-| `timespan`/`span` | `list[int,int,int]`                                          |
-| `code`            | `string` strictly `[A-Z0-9_]`                                |
-| `language`/`lang` | `code` IETF BCP-47                                           |
-| `country`/`cntry` | `code` ISO 3166-1 alpha-2                                    |
-| `subdivision`     | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)         |
-| `currency`/`curr` | `code` ISO 4217 alpha-3                                      |
-| `tax_code`        | `code` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym     |
-| `unit`            | `code` UN/CEFACT Rec. 20                                     |
-| `text`            | `strmap` of `lang,string` pairs<br />`string` for just one   |
-| `amount`/`price`  | String: `dec`<br />+ optional space and `curr`               |
+| `ratio`           | String: optional `-` + digits + `/` + digits                  |
+| `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")               |
+| `float`           | Number                                                        |
+| `date`/`_on`      | `uint` as `YYYYMMDD`                                          |
+| `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                      |
+| `timestamp`       | `int` Epoch                                                   |
+| `timespan`/`span` | `list[int,int,int]`                                           |
+| `code`            | `string` strictly `[A-Z0-9_]`                                 |
+| `language`/`lang` | `code` IETF BCP-47                                            |
+| `country`/`cntry` | `code` ISO 3166-1 alpha-2                                     |
+| `subdivision`     | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)          |
+| `currency`/`curr` | `code` ISO 4217 alpha-3                                       |
+| `tax_code`        | `code` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym      |
+| `unit`            | `code` UN/CEFACT Rec. 20                                      |
+| `text`            | `strmap` of `lang,string` pairs<br />`string` for just one    |
+| `amount`/`price`  | String: `dec`<br />+ optional space and `curr`                |
 | `tax`/`tax_amt`   | String: `dec`<br />+ optional space and `curr`<br />+ mandatory space + `tax_code` |
-| `quantity`        | String: `dec`<br />+ optional space and `unit`               |
-| `ip`              | String: IPv4 or IPv6 notation                                |
+| `quantity`        | String: `dec`<br />+ optional space and `unit`                |
+| `ip`              | String: IPv4 or IPv6 notation                                 |
 
 ### Units of measure
 
@@ -193,7 +193,7 @@ A `PATCH` record is a possibly incomplete copy of an existing record with the pr
 | Any         | Unchanged      | Omit entirely                     |
 | Any         | Unset          | Set to `Null` explicitly          |
 | Record list | Unchanged item | Omit entirely                     |
-| Record list | New item       | Record without ID                 |
+| Record list | New item       | Record without ID or with new ID  |
 | Record list | Edited item    | Record with ID and changed fields |
 | Record list | Deleted item   | Reference (record with only ID)   |
 | Other lists | Any change     | Full replacement                  |
