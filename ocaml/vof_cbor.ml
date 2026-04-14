@@ -34,6 +34,16 @@ let write_int buf i =
   if i >= 0 then write_head buf 0 i else write_head buf 1 (-1 - i)
 ;;
 
+(* Simple value, avoiding 20..127, max 255 *)
+let write_spacer buf = function
+  | n when n <= 0 -> ()
+  | n when n <= 20 -> add_byte buf (0xE0 + n - 1)
+  | n when n <= 148 ->
+    add_byte buf 0xF8;
+    add_byte buf (n + 107)
+  | _ -> invalid_arg "vof_cbor.write_spacer"
+;;
+
 let write_float buf f =
   match Float16.bits_of_float_opt f with
   | Some h -> add_byte buf 0xF9; add_be16 buf h
@@ -62,6 +72,13 @@ let write_array_head buf l =
   write_head buf 4 l
 ;;
 
+let write_array_open buf l =
+  if l < 0 then assert false;
+  if l < 24 then write_head buf 4 l else add_byte buf 0x9F
+;;
+
+let write_array_close buf l = if l >= 24 then add_byte buf 0xFF
+
 let write_array f buf l =
   let len = List.length l in
   if len <= 23 then write_head buf 4 len else add_byte buf 0x9F;
@@ -78,7 +95,7 @@ let write_strmap f buf sm =
 ;;
 
 let write_intmap f buf im =
-  let module IntMap = Vof.IntMap in
+  let module IM = Vof.IntMap in
   let len = IM.length im in
   if len <= 23 then write_head buf 5 len else add_byte buf 0xBF;
   IM.iter (fun k v -> write_int buf k; f buf v) im;
@@ -252,14 +269,57 @@ let rec encode_val ctx buf = function
     write_array_head buf 2; write_float buf lat; write_float buf lon
   | `Strmap sm -> write_strmap (encode_val ctx) buf sm
   | `Intmap im -> write_intmap (encode_val ctx) buf im
-  | `List l -> write_array (encode_val ctx) buf l
+  | `List l | `Series ([] as l) -> write_array (encode_val ctx) buf l
   | `Ndarray (shape, values) ->
-    write_array (encode_val ctx) buf
-      (`List (List.map (fun i -> `Int i) shape) :: values)
-  | `Enum _ -> failwith "vof_cbor: enum encoding requires context"
-  | `Variant _ -> failwith "vof_cbor: variant encoding requires context"
-  | `Record _ -> failwith "vof_cbor: record encoding requires context"
-  | `Series _ -> failwith "vof_cbor: series encoding requires context"
+    let len = 1 + Array.length values in
+    write_array_open buf len;
+    write_array write_int buf shape;
+    Array.iter (encode_val ctx buf) values;
+    write_array_close buf len
+  | `Enum (schema, s) | `Variant (schema, s, []) ->
+    Vof.Context.lookup_id ctx schema.path s |> write_int buf
+  | `Variant (schema, s, l) ->
+    write_array_head buf (1 + List.length l);
+    Vof.Context.lookup_id ctx schema.path s |> write_int buf;
+    List.iter (encode_val ctx) l
+  | `Record (schema, sm) ->
+    let idx = Vof.Context.lookup ctx schema.path in
+    let index_map k v acc = IntMap.add (Vof.Context.idx_id ctx idx k) v acc in
+    let im = Vof.StringMap.fold index_map sm Vof.IntMap.empty in
+    let last = ref (-1) in
+    let incr_len id _ acc =
+      let items = if id = !last + 1 then 1 else 2 in
+      last := id;
+      acc + items
+    in
+    let len = Vof.IntMap.fold incr_len im 0 in
+    write_array_open buf len;
+    last := -1;
+    let write_field id v =
+      let gap = id - !last - 1 in
+      if gap > 0 then write_spacer buf gap;
+      encode_val ctx buf v;
+      last := id
+    in
+    Vof.IntMap.iter write_field im;
+    write_array_close buf len
+  | `Series (`Record (schema, fst) :: _ as rl) ->
+    let idx = Vof.Context.lookup ctx schema.path in
+    let fl = StringMap.bindings fst |> List.map (fun (k, _) -> k) in
+    let len = 1 + (List.length rl * List.length fl) in
+    write_array_open buf len;
+    List.map (Vof.Context.idx_id ctx idx) fl |> write_array write_int buf;
+    let write_field sm f =
+      match StringMap.find_opt f sm with
+      | Some v -> encode_val ctx buf v
+      | None -> write_null buf
+    in
+    let write_record = function
+      | `Record (_, sm) -> List.iter (write_field sm) fl
+      | _ -> invalid_argument "vof_cbor.encode_val: non-record in series"
+    in
+    List.iter write_record rl; write_array_close buf len
+  | `Series _ -> invalid_argument "vof_cbor.encode_val: malformed series"
 ;;
 
 let encode_buf ctx ?(magic = false) ?(buf = Buffer.create 256) v =

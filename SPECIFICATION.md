@@ -14,7 +14,7 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `strmap`          | Object                                                        | Map                                  |
 | `variant`/`enum`  | Array[String,values…] / String                                | `list[Int,values…]` / `Int`          |
 | `record`          | Object (keys: names)                                          | `list[values and spacers]`           |
-| `series`          | 2D Array (row 0: names)                                       | `list[[IDs…], values…]`              |
+| `series`          | 2D Array (row 0: names) / Empty Array                         | `list[[IDs…], values…]` / `list[]`   |
 | `string`          | String (necessarily UTF-8)                                    | Text                                 |
 | `bytes`/`data`    | String base-64 URL encoded                                    | Bytes                                |
 | `uint`            | Number / String if outside MIN/MAX for float64                | Int                                  |
@@ -115,6 +115,8 @@ For example, a 16-field record with just `{ 0:1, 3:2, 9:3 }` becomes `[1,simple(
 ### Series
 
 Compact representation of a list of `record` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON, this is a 2-D Array where the first row selects fields by name and each subsequent row is an Array with just those values.
+
+An empty series must be encoded with a singular empty Array (i.e. `[]` not `[[]]`).
 
 <!-- adv --> In CBOR, this is a flat list where the first item is a list of numeric field IDs and the other items are the values of each record for the selected fields only, one after the other (no wrapping, no spacers).
 

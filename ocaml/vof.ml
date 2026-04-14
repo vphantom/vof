@@ -5,9 +5,79 @@ type schema = { path: string; keys: string list }
 
 let make_schema ?(keys = []) path = { path; keys }
 
-type context
+let both_opt = function
+  | Some a, Some b -> Some a, b
+  | _ -> None
+;;
 
-let make_context () = failwith "unimplemented"
+let three_opt = function
+  | Some a, Some b, Some c -> Some a, b, c
+  | _ -> None
+;;
+
+module Context = struct
+  type index = {
+    mutable sym_ids: int StringMap.t;
+    mutable id_syms: string array;
+  }
+
+  type t = {
+    update: bool;
+    mutable modified: bool;
+    root: string;
+    mutable registry: index StringMap.t;
+  }
+
+  let idx_make () = { sym_ids = StringMap.empty; id_syms = [||] }
+
+  let idx_id ctx idx s =
+    match ctx.update, StringMap.find_opt s idx.sym_ids with
+    | false, None -> assert false
+    | true, None ->
+      let id = Array.length idx.id_syms in
+      idx.id_syms <- Array.append idx.id_syms [| s |];
+      idx.sym_ids <- StringMap.add s id idx.sym_ids;
+      id
+    | _, Some id -> id
+  ;;
+
+  let idx_sym ctx idx id =
+    if id < 0 || id >= Array.length idx.id_syms
+    then None
+    else Some (Array.unsafe_get idx.id_syms id)
+  ;;
+
+  let make root path =
+    { update; modified = false; root; registry = StringMap.empty }
+  ;;
+
+  let add ctx path =
+    if not ctx.update then assert false;
+    let idx = idx_make () in
+    ctx.registry <- StringMap.add path idx ctx.registry;
+    idx
+  ;;
+
+  let lookup ctx path =
+    match StringMap.find_opt path ctx.registry with
+    | None -> add ctx path
+    | Some idx -> idx
+  ;;
+
+  let lookup_id ctx path s =
+    let idx = lookup ctx path in
+    idx_id ctx idx s
+  ;;
+
+  (* Remember to strip the root and '.' from each namespace. *)
+  let load ?(update = false) root path = failwith "unimplemented"
+
+  (* Remember to prepend the root to each namespace. *)
+  let save ctx =
+    if not ctx.update then assert false;
+    if ctx.modified then failwith "unimplemented"
+  ;;
+end
 
 module Decimal = struct
   type t = int * int
@@ -19,6 +89,12 @@ module Decimal = struct
     | 8 -> ((value * 10) lsl 3) lor 7
     | 9 -> (value lsl 3) lor 7
     | _ -> failwith "Vof.Decimal.pack: unsupported decimal places"
+  ;;
+
+  let unpack i =
+    let tag = n land 7 in
+    let value = n asr 3 in
+    if tag <= 6 then value, tag else value, 9
   ;;
 
   let of_string s =
@@ -42,8 +118,8 @@ module Decimal = struct
     then B.truncate buf !last_nonzero
     else int_chars := B.length buf;
     match int_of_string_opt (B.contents buf) with
-    | Some i -> Ok (i, B.length buf - !int_chars)
-    | None -> Error "invalid decimal string"
+    | Some i -> Some (i, B.length buf - !int_chars)
+    | None -> None
   ;;
 
   let to_string (value, dec) =
@@ -84,11 +160,11 @@ module Ratio = struct
     match String.split_on_char '/' s with
     | [ num; den ] -> (
       match int_of_string_opt num, int_of_string_opt den with
-      | Some n, Some d when d > 0 -> Ok (n, d)
-      | Some _, Some _ -> Error "invalid ratio: denominator must be positive"
-      | _ -> Error "invalid ratio"
+      | Some n, Some d when d > 0 -> Some (n, d)
+      | Some _, Some _ -> None
+      | _ -> None
     )
-    | _ -> Error "invalid ratio"
+    | _ -> None
   ;;
 
   let to_string (n, d) = Printf.sprintf "%d/%d" n d
@@ -110,6 +186,17 @@ module Date = struct
 
   let to_tm { year; month; day } =
     { tm_year = year - 1900; tm_mon = month - 1; tm_mday = day }
+  ;;
+
+  let to_human d = (d.year * 10000) + (d.month * 100) + d.day
+
+  let of_human n =
+    let y = n / 10000
+    and m = n mod 10000 / 100
+    and d = n mod 100 in
+    if y >= 1000 && y <= 9999 && m >= 1 && m <= 12 && d >= 1 && d <= 31
+    then Some { year = y; month = m; day = d }
+    else None
   ;;
 end
 
@@ -153,6 +240,33 @@ module Datetime = struct
       tm_hour = hour;
       tm_min = minute;
     }
+  ;;
+
+  let to_human dt =
+    (dt.year * 100000000)
+    + (dt.month * 1000000)
+    + (dt.day * 10000)
+    + (dt.hour * 100)
+    + dt.minute
+  ;;
+
+  let of_human n =
+    let y = n / 100_000_000
+    and m = n / 1_000_000 mod 100
+    and d = n / 10_000 mod 100
+    and h = n / 100 mod 100
+    and min = n mod 100 in
+    if
+      y >= 1000
+      && y <= 9999
+      && m >= 1
+      && m <= 12
+      && d >= 1
+      && d <= 31
+      && h <= 23
+      && min <= 59
+    then Some { year = y; month = m; day = d; hour = h; minute = min }
+    else None
   ;;
 end
 
@@ -200,7 +314,7 @@ type t = [
   | `Strmap of t StringMap.t
   | `Intmap of t IntMap.t
   | `List of t list
-  | `Ndarray of int list * t list
+  | `Ndarray of int list * t array
   | record
   | `Series of record list
 ] [@@ocamlformat "disable"]
@@ -213,6 +327,7 @@ type input = [
   | `Txt_int of int
   | `Txt_str of string
   | `Txt_list of input list
+  | `Vof_int of int
 ] [@@ocamlformat "disable"]
 
 type 'k cache = ('k, t) Hashtbl.t
@@ -228,20 +343,284 @@ let cached cache key f =
 ;;
 
 module Reader = struct
+  (* NOTE: Null not useful here *)
+
   let int = function
-    | `Bin_int n -> failwith "ZigZag decoding unimplemented"
-    | `Txt_int n | `Int n -> Some n
+    | `Vof_int n -> (n lsr 1) lxor ~-(n land 1)
+    | `Bin_int n | `Txt_int n | `Int n -> Some n
     | `Txt_str s | `Int_str s | `String s -> int_of_string_opt s
     | _ -> None
   ;;
 
   let uint = function
-    | `Bin_int n | `Txt_int n | `Uint n -> Some n
+    | `Vof_int n | `Bin_int n | `Txt_int n | `Uint n -> Some n
     | `Txt_str s | `Int_str s -> int_of_string_opt s
     | _ -> None
   ;;
 
-  (* TODO: all other types in Vof.t *)
+  let bool = function
+    | `Bool b -> Some b
+    | _ -> None
+  ;;
+
+  let float = function
+    | `Float f -> Some f
+    | `Bin_int n | `Txt_int n | `Int n | `Uint n -> Some (Float.of_int n)
+    | `Txt_str s | `String s -> float_of_string_opt s
+    | _ -> None
+  ;;
+
+  let string = function
+    | `Txt_str s | `Bin_str s | `String s -> Some s
+    | `Txt_int n | `Bin_int n | `Int n | `Uint n -> Some (Int.to_string n)
+    | _ -> None
+  ;;
+
+  let code = string
+  let language = string
+  let country = string
+  let subdivision = string
+  let currency = string
+  let tax_code = string
+  let unit_ = string
+
+  let data = function
+    | `Txt_str s | `Bin_str s | `String s -> Some (Bytes.of_string s)
+    | `Data d -> Some d
+    | _ -> None
+  ;;
+
+  let decimal = function
+    | `Decimal d -> Some d
+    | `Bin_int n | `Vof_int n -> Some (Decimal.unpack n)
+    | `Bin_str s | `Txt_str s | `String s -> Decimal.of_string s
+    | _ -> None
+  ;;
+
+  let ratio = function
+    | `Ratio r -> Some r
+    | `Bin_list [ n; d ] | `Txt_list [ n; d ] | `List [ n; d ] ->
+      both_opt (int n, uint d)
+    | `Bin_str s | `Txt_str s | `String s -> Ratio.of_string s
+    | _ -> None
+  ;;
+
+  let percent = function
+    (* TODO: bring to/of human in a Percent module, not here + vof_json *)
+    | `Percent d -> Some d
+    | `Bin_int n | `Vof_int n -> Some (Decimal.unpack n)
+    | `Txt_int i | `Int i | `Uint i -> Some (i, 2)
+    | `Txt_str s | `String s ->
+      let len = String.length s in
+      if len > 1 && s.[len - 1] = '%'
+      then (
+        match Decimal.of_string s with
+        | Some (v, p) -> Some (v / 100, p)
+        | None -> None
+      )
+      else None
+    | _ -> None
+  ;;
+
+  let timestamp = function
+    | `Timestamp ts -> Some ts
+    | `Bin_int n | `Vof_int n -> Some (Timestamp.unpack n)
+    | `Txt_int n | `Int n -> Some n
+    | `Txt_str s | `String s -> int_of_string_opt s
+    | _ -> None
+  ;;
+
+  let date = function
+    | `Date d -> Some d
+    | `Bin_int n | `Vof_int n | `Int n | `Uint n -> Some (Date.unpack n)
+    | `Txt_int n -> Date.of_human n
+    | `Txt_str s -> (
+      match int_of_string_opt s with
+      | Some n -> Date.of_human n
+      | None -> None
+    )
+    | _ -> None
+  ;;
+
+  let datetime = function
+    | `Datetime dt -> Some dt
+    | `Bin_int n | `Vof_int n | `Int n | `Uint n -> Some (Datetime.unpack n)
+    | `Txt_int n -> Datetime.of_human n
+    | `Txt_str s -> (
+      match int_of_string_opt s with
+      | Some n -> Datetime.of_human n
+      | None -> None
+    )
+    | _ -> None
+  ;;
+
+  let timespan = function
+    | `Timespan t -> Some t
+    | `Bin_list [ a; b; c ] | `Txt_list [ a; b; c ] ->
+      three_opt (int a, int b, int c)
+    | _ -> None
+  ;;
+
+  let amount = function
+    | `Amount a -> Some a
+    | `Bin_int n | `Vof_int n -> Some (Decimal.unpack n, None)
+    | `Bin_list [ d ] | `List [ d ] -> Some (d, None)
+    | `Bin_list [ d; c ] | `List [ d; c ] -> (
+      match decimal d, string c with
+      | Some d, Some c -> Some (d, Some c)
+      | _ -> None
+    )
+    | `Bin_str s | `Txt_str s | `String s -> (
+      match String.split_on_char ' ' s with
+      | [ ds ] -> Decimal.of_string ds |> Option.map (fun d -> d, None)
+      | [ ds; cs ] -> Decimal.of_string ds |> Option.map (fun d -> d, Some cs)
+      | _ -> None
+    )
+    | _ -> None
+  ;;
+
+  let quantity = function
+    | `Quantity q -> Some q
+    | `Bin_int n | `Vof_int n -> Some (Decimal.unpack n, None)
+    | `Bin_list [ d ] | `List [ d ] -> Some (d, None)
+    | `Bin_list [ d; u ] -> both_opt (decimal d, string u)
+    | `Txt_str s | `String s -> (
+      match String.split_on_char ' ' s with
+      | [ ds ] -> Decimal.of_string ds |> Option.map (fun d -> d, None)
+      | [ ds; us ] -> Decimal.of_string ds |> Option.map (fun d -> d, Some us)
+      | _ -> None
+    )
+    | _ -> None
+  ;;
+
+  let tax = function
+    | `Tax t -> Some t
+    | `Bin_int n | `Vof_int n -> Some (Decimal.unpack n, None, None)
+    | `Bin_list [ d ] | `List [ d ] -> Some (d, None, None)
+    | `Bin_list [ d; t ] -> (
+      match decimal d, string t with
+      | Some d, Some t -> Some (d, None, Some t)
+      | _ -> None
+    )
+    | `Bin_list [ d; t; c ] -> three_opt (decimal d, string t, string c)
+    | `Txt_str s | `String s -> (
+      match String.split_on_char ' ' s with
+      | [ ds ] -> Decimal.of_string ds |> Option.map (fun d -> d, None, None)
+      | [ ds; ts ] ->
+        Decimal.of_string ds |> Option.map (fun d -> d, None, Some ts)
+      | [ ds; cs; ts ] ->
+        Decimal.of_string ds |> Option.map (fun d -> d, Some cs, Some ts)
+      | _ -> None
+    )
+    | _ -> None
+  ;;
+
+  let coords = function
+    | `Coords (a, b) -> Some (a, b)
+    | `Bin_list [ a; b ] | `Txt_list [ a; b ] | `List [ a; b ] ->
+      both_opt (float a, float b)
+    | _ -> None
+  ;;
+
+  let ip = function
+    | `Data d | `Ip d -> d
+    | `Bin_str s -> Bytes.of_string s
+    | `Txt_str s | `String s ->
+      Ipaddr.of_string s |> Result.to_option |> Option.map Bytes.of_string
+    | _ -> None
+  ;;
+
+  let subnet = function
+    | `Subnet s -> Some s
+    | `Bin_list [ a; n ] | `Txt_list [ a; n ] -> both_opt (ip a, uint n)
+    | `Txt_str s | `String s -> (
+      let module I = Ipaddr in
+      let module IP = Ipaddr.Prefix in
+      match IP.of_string s with
+      | Ok p -> Some (IP.network p |> I.to_octets |> Bytes.of_string, IP.bits p)
+      | Error _ -> none
+    )
+    | _ -> None
+  ;;
+
+  let strmap f = function
+    | `List l | `Bin_list l | `Txt_list l ->
+      let rec each sm = function
+        | [] -> Some sm
+        | k :: v :: rest -> (
+          match string k, f v with
+          | Some ks, Some v' -> each (StringMap.add ks v' sm) rest
+          | _ -> None
+        )
+        | _ -> None
+      in
+      each StringMap.empty l
+    | _ -> None
+  ;;
+
+  let text = strmap string
+
+  let intmap f = function
+    | `List l | `Bin_list l | `Txt_list l ->
+      let rec each sm = function
+        | [] -> Some sm
+        | k :: v :: rest -> (
+          match int k, f v with
+          | Some ki, Some v' -> each (IntMap.add ki v' sm) rest
+          | _ -> None
+        )
+        | _ -> None
+      in
+      each IntMap.empty l
+    | _ -> None
+  ;;
+
+  exception Reader_return
+
+  let list f = function
+    | `List l | `Bin_list l | `Txt_list l -> (
+      let[@tail_mod_cons] rec go = function
+        | [] -> []
+        | x :: xs -> (
+          match f x with
+          | Some y -> y :: go xs
+          | None -> raise_notrace Reader_return
+        )
+      in
+      try Some (go l) with Reader_return -> None
+    )
+    | _ -> None
+  ;;
+
+  let ndarray f v =
+    (* TODO: confirm that the array size is the product of declared sizes *)
+    let map_array sizes a =
+      let next x =
+        match f x with
+        | Some v -> v
+        | None -> raise_notrace Reader_return
+      in
+      try
+        let out = Array.map next a in
+        Some (sizes, out)
+      with Reader_return -> None
+    in
+    match v with
+    | `Ndarray (sizes, vals) -> map_array sizes vals
+    | `List (sizes :: vals)
+    | `Bin_list (sizes :: vals)
+    | `Txt_list (sizes :: vals) -> (
+      match list int sizes with
+      | Some sl -> Array.of_list vals |> map_array sl
+      | None -> None
+    )
+    | _ -> None
+  ;;
+
+  (* TODO: `Enum of schema * string *)
+  (* TODO: `Variant of schema * string * t list *)
+  (* TODO: `Record of schema * t StringMap.t *)
+  (* TODO: `Series of record list *)
 end
 
 (* PATCH *)
@@ -285,6 +664,20 @@ let tag : t -> int = function
   | `Series _ -> 35
 ;;
 
+(* NOTE: OCaml 5.4 will have Array.compare *)
+let array_compare cmp a1 a2 =
+  let n = min (Array.length v1) (Array.length v2) in
+  let rec next i =
+    if i >= n
+    then Int.compare (Array.length v1) (Array.length v2)
+    else (
+      let c = compare v1.(i) v2.(i) in
+      if c <> 0 then c else next (i + 1)
+    )
+  in
+  next 0
+;;
+
 let rec compare (a : t) (b : t) : int =
   match a, b with
   | `Null, `Null -> 0
@@ -322,7 +715,7 @@ let rec compare (a : t) (b : t) : int =
   | `List a, `List b -> List.compare compare a b
   | `Ndarray (s1, v1), `Ndarray (s2, v2) ->
     let c = List.compare Int.compare s1 s2 in
-    if c <> 0 then c else List.compare compare v1 v2
+    if c <> 0 then c else array_compare compare v1 v2
   | `Series a, `Series b ->
     List.compare
       (fun (`Record (_, a)) (`Record (_, b)) -> StringMap.compare compare a b)

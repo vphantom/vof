@@ -50,20 +50,6 @@ let to_ratio = function
   | _ -> Error "invalid ratio"
 ;;
 
-let of_date d = `Int ((d.year * 10000) + (d.month * 100) + d.day)
-
-let to_date j =
-  match to_int j with
-  | None -> Error "invalid date"
-  | Some i ->
-    let y = i / 10000 in
-    let m = i mod 10000 / 100 in
-    let d = i mod 100 in
-    if y < 1000 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31
-    then Error "invalid date"
-    else Ok { year = y; month = m; day = d }
-;;
-
 let of_datetime dt =
   `Int
     ((dt.year * 100000000)
@@ -87,7 +73,7 @@ let rec of_vof = function
   | `Decimal d -> of_decimal d
   | `Ratio r -> of_ratio r
   | `Percent (v, p) -> `String (Decimal.to_string (v * 100, p) ^ "%")
-  | `Date d -> of_date d
+  | `Date d -> `Int (Vof.Date.to_human d)
   | `Datetime dt -> of_datetime dt
   | `Timespan (a, b, c) -> `List [ `Int a; `Int b; `Int c ]
   | `Code s
@@ -128,7 +114,7 @@ let rec of_vof = function
   | `List l -> `List (List.map of_vof l)
   | `Ndarray (il, l) ->
     let sizes = `List (List.map (fun i -> `Int i) il) in
-    `List (sizes :: List.map of_vof l)
+    `List (sizes :: Array.(map of_vof a |> to_list))
   | `Series [] -> `List []
   | `Series (`Record (_, first) :: _ as rl) ->
     let keys = StringMap.fold (fun k _ acc -> k :: acc) first [] |> List.rev in
