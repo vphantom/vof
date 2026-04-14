@@ -82,19 +82,30 @@ end
 module Decimal = struct
   type t = int * int
 
+  let[@inline] optimize (value, dec) =
+    let value, dec = ref value, ref dec in
+    while !dec > 0 && !value mod 10 = 0 do
+      value := !value / 10;
+      decr dec
+    done;
+    !value, !dec
+  ;;
+
   let pack (value, dec) =
+    let value, dec = optimize (value, dec) in
     match dec with
-    | 0 .. 6 -> (value lsl 3) lor tag
+    | 0 .. 6 -> (value lsl 3) lor dec
     | 7 -> ((value * 100) lsl 3) lor 7
     | 8 -> ((value * 10) lsl 3) lor 7
     | 9 -> (value lsl 3) lor 7
     | _ -> failwith "Vof.Decimal.pack: unsupported decimal places"
   ;;
 
-  let unpack i =
-    let tag = n land 7 in
+  let unpack n =
+    let dec = n land 7 in
     let value = n asr 3 in
-    if tag <= 6 then value, tag else value, 9
+    let value, dec = if dec <= 6 then value, dec else value, 9 in
+    optimize (value, dec)
   ;;
 
   let of_string s =
@@ -176,8 +187,12 @@ module Date = struct
   let pack d = ((d.year - 1900) lsl 9) lor (d.month lsl 5) lor d.day
 
   let unpack i =
-    (* TODO: range checks *)
-    { year = (i lsr 9) + 1900; month = (i lsr 5) land 15; day = i land 31 }
+    let d =
+      { year = (i lsr 9) + 1900; month = (i lsr 5) land 15; day = i land 31 }
+    in
+    if d.month >= 1 && d.month <= 12 && d.day >= 1 && d.day <= 31
+    then Some d
+    else None
   ;;
 
   let of_tm tm =
@@ -212,14 +227,24 @@ module Datetime = struct
   ;;
 
   let unpack i =
-    (* TODO: range checks *)
-    {
-      year = (i lsr 20) + 1900;
-      month = (i lsr 16) land 15;
-      day = (i lsr 11) land 31;
-      hour = (i lsr 6) land 63;
-      minute = i land 63;
-    }
+    let dt =
+      {
+        year = (i lsr 20) + 1900;
+        month = (i lsr 16) land 15;
+        day = (i lsr 11) land 31;
+        hour = (i lsr 6) land 63;
+        minute = i land 63;
+      }
+    in
+    if
+      dt.month >= 1
+      && dt.month <= 12
+      && dt.day >= 1
+      && dt.day <= 31
+      && dt.hour <= 23
+      && dt.minute <= 59
+    then Some dt
+    else None
   ;;
 
   let of_tm tm =
@@ -406,7 +431,6 @@ module Reader = struct
   ;;
 
   let percent = function
-    (* TODO: bring to/of human in a Percent module, not here + vof_json *)
     | `Percent d -> Some d
     | `Bin_int n | `Vof_int n -> Some (Decimal.unpack n)
     | `Txt_int i | `Int i | `Uint i -> Some (i, 2)
@@ -593,14 +617,15 @@ module Reader = struct
   ;;
 
   let ndarray f v =
-    (* TODO: confirm that the array size is the product of declared sizes *)
     let map_array sizes a =
-      let next x =
-        match f x with
-        | Some v -> v
-        | None -> raise_notrace Reader_return
-      in
       try
+        let expected = List.fold_left ( * ) 1 sizes in
+        if expected <> Array.length a then raise_notrace Reader_return;
+        let next x =
+          match f x with
+          | Some v -> v
+          | None -> raise_notrace Reader_return
+        in
         let out = Array.map next a in
         Some (sizes, out)
       with Reader_return -> None

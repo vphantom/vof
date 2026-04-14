@@ -21,7 +21,7 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `int`/`sint`      | Number / String if outside MIN/MAX for float64                | Int                                  |
 | `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | `sint << 3` + 0..9 places            |
 | `ratio`           | String: optional `-` + digits + `/` + digits                  | `list[int,uint]`                     |
-| `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")               | `dec` rebased to 1 (i.e. 50% is 0.5) |
+| `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")               | `dec` hundredths                     |
 | `float`           | Number                                                        | Float                                |
 | `date`/`_on`      | `uint` as `YYYYMMDD`                                          | `uint`                               |
 | `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                      | `uint`                               |

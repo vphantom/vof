@@ -35,15 +35,10 @@ let to_int = function
   | _ -> None
 ;;
 
-let to_timestamp = to_int
-let of_decimal d = `String (to_string d)
-
 let to_decimal = function
   | `String s -> Decimal.of_string s
   | _ -> Error "invalid decimal"
 ;;
-
-let of_ratio r = `String (Ratio.to_string r)
 
 let to_ratio = function
   | `String s -> Ratio.of_string s
@@ -70,8 +65,8 @@ let rec of_vof = function
   | `Data d -> `String (bytes_to_b64url d)
   | `Enum (_, s) -> `String s
   | `Variant (_, s, l) -> `List (`String s :: List.map of_vof l)
-  | `Decimal d -> of_decimal d
-  | `Ratio r -> of_ratio r
+  | `Decimal d -> `String (Decimal.to_string d)
+  | `Ratio r -> `String (Ratio.to_string r)
   | `Percent (v, p) -> `String (Decimal.to_string (v * 100, p) ^ "%")
   | `Date d -> `Int (Vof.Date.to_human d)
   | `Datetime dt -> of_datetime dt
