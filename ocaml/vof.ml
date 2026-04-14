@@ -352,6 +352,7 @@ type input = [
   | `Txt_int of int
   | `Txt_str of string
   | `Txt_list of input list
+  | `Gap of int
   | `Vof_int of int
 ] [@@ocamlformat "disable"]
 
@@ -372,7 +373,7 @@ module Reader = struct
 
   let int = function
     | `Vof_int n -> (n lsr 1) lxor ~-(n land 1)
-    | `Bin_int n | `Txt_int n | `Int n -> Some n
+    | `Bin_int n | `Txt_int n | `Int n | `Uint n -> Some n
     | `Txt_str s | `Int_str s | `String s -> int_of_string_opt s
     | _ -> None
   ;;
@@ -642,10 +643,54 @@ module Reader = struct
     | _ -> None
   ;;
 
-  (* TODO: `Enum of schema * string *)
-  (* TODO: `Variant of schema * string * t list *)
-  (* TODO: `Record of schema * t StringMap.t *)
-  (* TODO: `Series of record list *)
+  let variant ctx schema f = function
+    | `Enum (_, s) -> f s []
+    | `Variant (_, s, l) -> f s (l :> input list)
+    | `Bin_str s | `Txt_str s | `String s -> f s []
+    | `Bin_int n | `Txt_int n | `Vof_int n | `Int n | `Uint n ->
+      let idx = Context.lookup ctx schema.path in
+      Context.idx_sym ctx idx n |> Option.bind (fun s -> f s [])
+    | `Bin_list (s :: l) | `Txt_list (s :: l) | `List (s :: l) ->
+      let idx = Context.lookup ctx schema.path in
+      ( match s with
+      | `Bin_int n | `Txt_int n | `Vof_int n | `Int n | `Uint n ->
+        Context.idx_sym ctx idx n
+      | `Bin_str s | `Txt_str s | `String s -> Some s
+      | _ -> None
+      )
+      |> Option.bind (fun name -> f name l)
+    | _ -> None
+  ;;
+
+  let record ctx schema f = function
+    | `Record (_, sm) -> f sm
+    | `Txt_list l | `List l ->
+      let rec pairs sm = function
+        | [] -> f sm
+        | k :: v :: rest -> (
+          match string k with
+          | Some ks -> pairs (StringMap.add ks v sm) rest
+          | None -> None
+        )
+        | _ -> None
+      in
+      pairs StringMap.empty l
+    | `Bin_list l ->
+      let idx = Context.lookup ctx schema.path in
+      let rec next pos sm = function
+        | [] -> f sm
+        | `Gap n :: rest -> next (pos + n) sm rest
+        | v :: rest ->
+          let sm =
+            match Context.idx_sym ctx idx pos with
+            | Some k -> StringMap.add k v sm
+            | None -> sm
+          in
+          next (pos + 1) sm rest
+      in
+      next 0 StringMap.empty l
+    | _ -> None
+  ;;
 end
 
 (* PATCH *)

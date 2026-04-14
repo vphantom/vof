@@ -195,9 +195,13 @@ let decode ?(pos = 0) ?len src =
       item ()
     | 7 -> (
       match additional with
+      | n when n <= 19 -> `Gap (n + 1)
       | 20 -> `Bool false
       | 21 -> `Bool true
       | 22 -> `Null
+      | 24 ->
+        let sv = read_byte () in
+        if sv >= 128 then `Gap (sv - 107) else raise_notrace Exit
       | 25 -> `Float (Float16.float_of_bits (read_be16 ()))
       | 26 ->
         if !p + 4 > limit then raise_notrace Exit;
