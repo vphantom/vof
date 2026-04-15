@@ -1,5 +1,10 @@
 # TODO
 
+## Records, Series
+
+- [ ] Series encoding should iterate through the list of records to collect all fields, instead of relying on the first record, in order to eliminate the case where surprising fields caused the whole thing to fail.
+- [ ] JSON series encoding should sort by integer ID instead of string name, so that schema additions are appended over time.  This means adding context arguments where needed.
+
 ## MLI notes
 
 The MLI file is so old and partial, we'll probably start a new one from scratch.

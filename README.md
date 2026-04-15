@@ -14,7 +14,7 @@ All three formats can be used as-is or with Gzip or Zstd compression.
 
 Design goals:
 
-* Easy to implement in a new language (weekend project)
+* Easy to implement in a new language (weekend project for a typical subset)
 * Low CPU/memory requirements to encode and especially decode
 * Space-efficient output size
 * Easy versioning with numbered record fields (like Protobuf)
@@ -42,7 +42,7 @@ To help with schema evolution, VOF specifies namespace files to be shared betwee
 
 ### Specification Status
 
-Release Candidate 10 - 2026-04-12
+Release Candidate 11 - 2026-04-15
 
 ## ROADMAP
 

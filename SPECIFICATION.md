@@ -104,7 +104,7 @@ For example, a 3D array of size 2x2x2 could be: `[[2,2,2],1,2,3,4,5,6,7,8]`
 
 ### Record
 
-In CBOR, records are a list in which fields are positional (field ID 0 in first place, field ID 20 in 21st place, etc.)  Missing fields are replaced by spacers, CBOR Simple values stating how many missing values they represent.  Simple values 0..19 mean skip 1..20 fields, 128..255 mean to skip 21..148 fields.  Omit any trailing spacers.
+In CBOR, records are a list in which fields are positional (field ID 0 in first place, field ID 20 in 21st place, etc.)  Missing fields are replaced by spacers, CBOR Simple values stating how many missing values they represent.  Simple values 0..19 mean skip 1..20 fields, 128..255 mean to skip 21..148 fields.  Omit any trailing spacers when encoding, but tolerate them when decoding.
 
 Note that a CBOR Null in a field position explicitly sets the field to Null, which is distinct from being absent using a spacer.
 
@@ -114,9 +114,9 @@ For example, a 16-field record with just `{ 0:1, 3:2, 9:3 }` becomes `[1,simple(
 
 ### Series
 
-Compact representation of a list of `record` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON, this is a 2-D Array where the first row selects fields by name and each subsequent row is an Array with just those values.
+Compact representation of a list of `record` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON, this is a 2-D Array where the first row selects fields by name and each subsequent row is an Array with just those values.  If numeric field IDs are available, that order should be used instead of alphanumeric, to make field order vary the least over time.
 
-An empty series must be encoded with a singular empty Array (i.e. `[]` not `[[]]`).
+Any field missing from a record is encoded as `Null`.  An empty series must be encoded with a singular empty Array (i.e. `[]` not `[[]]`).
 
 <!-- adv --> In CBOR, this is a flat list where the first item is a list of numeric field IDs and the other items are the values of each record for the selected fields only, one after the other (no wrapping, no spacers).
 
@@ -383,14 +383,6 @@ Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceedi
 | 0x5B or 0x7B        | JSON (array, object)          |
 | 0x80-0xDF           | CBOR (array, map, tag, magic) |
 | 0xEB-0xFF           | VOF Binary (non-numeric)      |
-
-<!-- /advanced -->
-
-### Series
-
-Encoders should use the first record of the list to determine the structure of all records in the list.  They should fail if a subsequent member has extra fields set.  If subsequent members are missing any fields though, encoders should encode `Null` for them in order to keep going.
-
-<!-- advanced -->
 
 ## Design Compromises
 

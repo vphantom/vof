@@ -604,15 +604,15 @@ module Reader = struct
 
   let list f = function
     | `List l | `Bin_list l | `Txt_list l -> (
-      let[@tail_mod_cons] rec go = function
+      let[@tail_mod_cons] rec next = function
         | [] -> []
         | x :: xs -> (
           match f x with
-          | Some y -> y :: go xs
+          | Some x' -> x' :: next xs
           | None -> raise_notrace Reader_return
         )
       in
-      try Some (go l) with Reader_return -> None
+      try Some (next l) with Reader_return -> None
     )
     | _ -> None
   ;;
@@ -690,6 +690,82 @@ module Reader = struct
       in
       next 0 StringMap.empty l
     | _ -> None
+  ;;
+
+  let series ctx schema f = function
+    | `Bin_list [] | `Txt_list [] | `List [] -> Some []
+    | `Series l -> (
+      let[@tail_mod_cons] rec next = function
+        | [] -> []
+        | `Record (_, sm) :: rest -> (
+          match f sm with
+          | Some v -> v :: next rest
+          | None -> raise_notrace Reader_return
+        )
+      in
+      try Some (next l) with Reader_return -> None
+    )
+    | `Txt_list (fields :: rows) | `List (fields :: rows) -> (
+      match list string fields with
+      | None -> None
+      | Some names -> (
+        let rec zip sm ks vs =
+          match ks, vs with
+          | k :: ks, v :: vs -> zip (StringMap.add k v sm) ks vs
+          | _ -> f sm
+        in
+        let build_row = function
+          | `Txt_list vals | `List vals -> zip StringMap.empty names vals
+          | _ -> None
+        in
+        let[@tail_mod_cons] rec next = function
+          | [] -> []
+          | row :: rest -> (
+            match build_row row with
+            | Some v -> v :: next rest
+            | None -> raise_notrace Reader_return
+          )
+        in
+        try Some (next rows) with Reader_return -> None
+      )
+    )
+    | `Bin_list (fields :: values) -> (
+      let idx = Context.lookup ctx schema.path in
+      match list uint fields with
+      | None -> None
+      | Some ids ->
+        let names = List.filter_map (Context.idx_sym ctx idx) ids in
+        if List.length names <> List.length ids
+        then None
+        else if names = []
+        then Some []
+        else (
+          let remaining = ref values in
+          let read_row () =
+            let rec consume sm = function
+              | [] -> sm
+              | k :: ks -> (
+                match !remaining with
+                | v :: vs ->
+                  remaining := vs;
+                  consume (StringMap.add k v sm) ks
+                | [] -> raise_notrace Reader_return
+              )
+            in
+            consume StringMap.empty names
+          in
+          let[@tail_mod_cons] rec read_all () =
+            match !remaining with
+            | [] -> []
+            | _ -> (
+              match f (read_row ()) with
+              | Some v -> v :: read_all ()
+              | None -> raise_notrace Reader_return
+            )
+          in
+          try Some (read_all ()) with Reader_return -> None
+        )
+    )
   ;;
 end
 
