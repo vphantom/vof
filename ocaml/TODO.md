@@ -5,6 +5,14 @@
 - [ ] Series encoding should iterate through the list of records to collect all fields, instead of relying on the first record, in order to eliminate the case where surprising fields caused the whole thing to fail.
 - [ ] JSON series encoding should sort by integer ID instead of string name, so that schema additions are appended over time.  This means adding context arguments where needed.
 
+## VOF Binary
+
+It's been simplified so much that it's low-hanging fruit at this point.  A single day of work to add as an alternative to VOF CBOR.
+
+- [ ] Factor out the parsing of records into IntMap.t and make a callback-driven iterator that yields gaps and values from `vof_cbor.ml` to `vof.ml`
+- [ ] Factor out series field-list extraction to ordered field IDs, and the per-row value extraction logic from `vof_cbor.ml` to `vof.ml`
+- [ ] Create `vof_bin.ml` inspired by `vof_cbor.ml`
+
 ## MLI notes
 
 The MLI file is so old and partial, we'll probably start a new one from scratch.
