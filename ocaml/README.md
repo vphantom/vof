@@ -5,6 +5,7 @@ OCaml reference implementation of VOF data types and convenience utilities.  Thi
 * A polymorphic variant matching the rich data types of VOF;
 * Simple scalar types a compatible subset of `Yojson.Basic.t`;
 * JSON encoding to/from `Yojson.Basic.t` without explicit dependency;
+* CBOR codec built-in;
 * Diff to create PATCH records;
 * Cache to help with encoding efficiency;
 * Typed decoding helper functions.
@@ -22,5 +23,4 @@ As of this version, the final encoding and decoding is left to the caller and th
 
 ## Known Limitations
 
-* CBOR Enum, Variant, Record and Series I/O is not yet implemented
 * Binary I/O is not yet implemented

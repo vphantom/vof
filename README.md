@@ -8,7 +8,7 @@ VOF is an API design, type system and serialization specification.  It fills my 
 
 * **JSON** — Human-readable, fairly self-documenting but verbose
 * **CBOR** — Very compact using CBOR as a low-level format
-* **VOF Binary** — Most compact but fully custom encoding (overkill for most applications)
+* **VOF Binary** — Simpler and most compact, but fully custom encoding
 
 All three formats can be used as-is or with Gzip or Zstd compression.
 
@@ -24,7 +24,7 @@ Design goals:
 * Explicit JSON-CBOR-VOF interoperability (like Protobuf)
 * Unambiguous decoding from any specified format and compression scheme
 
-Goals specific to VOF Binary:
+Goals specific to CBOR and VOF Binary:
 
 * Streamable
 * Very compact record type
