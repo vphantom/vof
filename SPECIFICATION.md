@@ -19,7 +19,7 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `bytes`/`data`    | String base-64 URL encoded                                    | Bytes                                |
 | `uint`            | Number / String if outside MIN/MAX for float64                | Int                                  |
 | `int`/`sint`      | Number / String if outside MIN/MAX for float64                | Int                                  |
-| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | `sint << 3` + 0..9 places            |
+| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | `<< 3` + 0..9 places                 |
 | `ratio`           | String: optional `-` + digits + `/` + digits                  | `list[int,uint]`                     |
 | `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")               | `dec` hundredths                     |
 | `float`           | Number                                                        | Float                                |
@@ -124,7 +124,15 @@ Any field missing from a record is encoded as `Null`.  An empty series must be e
 
 Necessary for financial data.  In JSON, it must be a string to bypass possible float conversions done by some libraries.
 
-<!-- adv --> In CBOR, this is passed to the encoder as a signed integer left-shifted 3 bits to add a 3-bit value representing 0, 1, 2, 3, 4, 5, 6 or 9 decimal places.  For example, -2.135 would be `(-2135 << 3) + 3 = -17083`.
+<!-- advanced -->
+
+In binary formats, the value integer is left-shifted 3 bits to add a tag representing 0, 1, 2, 3, 4, 5, 6 or 9 decimal places.  For example, 2.135 would be `(2135 << 3) + 3 = 17083`.
+
+In CBOR, negatives are handled implicitly.
+
+In VOF Binary, the absolute value is encoded as an unsigned integer and an optional `Alt` qualifier is prefixed if the value is negative.
+
+<!-- /advanced -->
 
 ### Date
 
@@ -372,6 +380,10 @@ Every HTTP response is a `$msg` record, which consists of a few meta-data fields
 
 ## Implementation Considerations
 
+### Maps
+
+Decoders should use the last value when a key is present multiple times.
+
 <!-- advanced -->
 
 Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceeding 100-200 bytes.  Decoders can always know the format of VOF data by inspecting the first few bytes:
@@ -387,6 +399,7 @@ Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceedi
 ## Design Compromises
 
 * The `decimal`, `date` and `datetime` types were designed for financial systems based on SQLite and kept here for their compact sizes.
+* Negative decimals incur a one-byte penalty to optimize for positive cases which dominate in business applications.
 * The `code` type was initially designed as a base 37 `uint`, but the space savings were not worth the implementation complexity.
 * The last size of `decimal` is 9 and not 7 in order to match the maximum precision allowed in some other business contexts such as ANSI X12.
 

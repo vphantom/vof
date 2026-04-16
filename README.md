@@ -42,7 +42,7 @@ To help with schema evolution, VOF specifies namespace files to be shared betwee
 
 ### Specification Status
 
-Release Candidate 11 - 2026-04-15
+Release Candidate 12 - 2026-04-16
 
 ## ROADMAP
 
