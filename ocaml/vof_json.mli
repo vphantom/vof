@@ -17,5 +17,5 @@ type t = [
     functions. *)
 val to_input : t -> Vof.input
 
-(** [of_vof v] converts VOF [v] to JSON. *)
-val of_vof : Vof.t -> t
+(** [of_vof ctx v] converts VOF [v] to JSON with context [ctx]. *)
+val of_vof : Vof.Context.t -> Vof.t -> t

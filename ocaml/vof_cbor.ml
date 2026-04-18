@@ -1,3 +1,5 @@
+open Vof
+
 let[@inline] add_byte buf n = Buffer.add_char buf (Char.chr (n land 0xFF))
 let[@inline] add_be16 buf n = Buffer.add_uint16_be buf n
 let[@inline] add_be32 buf n = Buffer.add_int32_be buf n
@@ -16,10 +18,10 @@ let write_head buf major n =
     add_be16 buf n
   | n when n <= 0xFFFF_FFFF ->
     add_byte buf (m lor 26);
-    add_be32 buf n
+    Int32.of_int n |> add_be32 buf
   | n ->
     add_byte buf (m lor 27);
-    add_be64 buf n
+    Int64.of_int n |> add_be64 buf
 ;;
 
 let write_magic buf = add_be16 buf 0xD9D9; add_byte buf 0xF7
@@ -34,18 +36,8 @@ let write_int buf i =
   if i >= 0 then write_head buf 0 i else write_head buf 1 (-1 - i)
 ;;
 
-(* Simple value, avoiding 20..127, max 255 *)
-let write_spacer buf = function
-  | n when n <= 0 -> ()
-  | n when n <= 20 -> add_byte buf (0xE0 + n - 1)
-  | n when n <= 148 ->
-    add_byte buf 0xF8;
-    add_byte buf (n + 107)
-  | _ -> invalid_arg "vof_cbor.write_spacer"
-;;
-
 let write_float buf f =
-  match Float16.bits_of_float_opt f with
+  match Vof_float16.bits_of_float_opt f with
   | Some h -> add_byte buf 0xF9; add_be16 buf h
   | None ->
     let i32 = Int32.bits_of_float f in
@@ -58,8 +50,8 @@ let write_float buf f =
 ;;
 
 let write_bytes buf s =
-  write_head buf 2 (String.length s);
-  Buffer.add_string buf s
+  write_head buf 2 (Bytes.length s);
+  Buffer.add_bytes buf s
 ;;
 
 let write_text buf s =
@@ -79,6 +71,13 @@ let write_array_open buf l =
 
 let write_array_close buf l = if l >= 24 then add_byte buf 0xFF
 
+let write_map_open buf l =
+  if l < 0 then assert false;
+  if l < 24 then write_head buf 5 l else add_byte buf 0xBF
+;;
+
+let write_map_close buf l = if l >= 24 then add_byte buf 0xFF
+
 let write_array f buf l =
   let len = List.length l in
   if len <= 23 then write_head buf 4 len else add_byte buf 0x9F;
@@ -87,16 +86,16 @@ let write_array f buf l =
 ;;
 
 let write_strmap f buf sm =
-  let module SM = Vof.StringMap in
-  let len = SM.length sm in
+  let module SM = StringMap in
+  let len = SM.cardinal sm in
   if len <= 23 then write_head buf 5 len else add_byte buf 0xBF;
   SM.iter (fun k v -> write_text buf k; f buf v) sm;
   if len > 23 then add_byte buf 0xFF
 ;;
 
-let write_intmap f buf im =
-  let module IM = Vof.IntMap in
-  let len = IM.length im in
+let write_uintmap f buf im =
+  let module IM = IntMap in
+  let len = IM.cardinal im in
   if len <= 23 then write_head buf 5 len else add_byte buf 0xBF;
   IM.iter (fun k v -> write_int buf k; f buf v) im;
   if len > 23 then add_byte buf 0xFF
@@ -195,14 +194,10 @@ let decode ?(pos = 0) ?len src =
       item ()
     | 7 -> (
       match additional with
-      | n when n <= 19 -> `Gap (n + 1)
       | 20 -> `Bool false
       | 21 -> `Bool true
       | 22 -> `Null
-      | 24 ->
-        let sv = read_byte () in
-        if sv >= 128 then `Gap (sv - 107) else raise_notrace Exit
-      | 25 -> `Float (Float16.float_of_bits (read_be16 ()))
+      | 25 -> `Float (Vof_float16.float_of_bits (read_be16 ()))
       | 26 ->
         if !p + 4 > limit then raise_notrace Exit;
         let n = Bytes.get_int32_be raw !p in
@@ -226,13 +221,13 @@ let rec encode_val ctx buf = function
   | `Int i | `Uint i -> write_int buf i
   | `Float f -> write_float buf f
   | `String s -> write_text buf s
-  | `Data d | `Ip d -> Bytes.to_string d |> write_bytes buf
-  | `Decimal d -> Vof.Decimal.pack d |> write_int buf
+  | `Data d | `Ip d -> write_bytes buf d
+  | `Decimal d -> Decimal.pack d |> write_int buf
   | `Ratio (n, d) -> write_array_head buf 2; write_int buf n; write_int buf d
-  | `Percent d -> Vof.Decimal.pack d |> write_int buf
-  | `Timestamp ts -> Vof.Timestamp.pack ts |> write_int buf
-  | `Date d -> Vof.Date.pack d |> write_int buf
-  | `Datetime dt -> Vof.Datetime.pack dt |> write_int buf
+  | `Percent d -> Decimal.pack d |> write_int buf
+  | `Timestamp ts -> Timestamp.pack ts |> write_int buf
+  | `Date d -> Date.pack d |> write_int buf
+  | `Datetime dt -> Datetime.pack dt |> write_int buf
   | `Timespan (a, b, c) ->
     write_array_head buf 3; write_int buf a; write_int buf b; write_int buf c
   | `Code s
@@ -244,13 +239,13 @@ let rec encode_val ctx buf = function
   | `Unit s -> write_text buf s
   | `Text tm -> write_strmap write_text buf tm
   | `Amount (d, opt) -> (
-    let dec = Vof.Decimal.pack d in
+    let dec = Decimal.pack d in
     match opt with
     | None -> write_int buf dec
     | Some c -> write_array_head buf 2; write_int buf dec; write_text buf c
   )
   | `Tax (d, curr, tax) -> (
-    let dec = Vof.Decimal.pack d in
+    let dec = Decimal.pack d in
     match tax, curr with
     | Some t, Some c ->
       write_array_head buf 3;
@@ -262,7 +257,7 @@ let rec encode_val ctx buf = function
     | None, _ -> write_int buf dec
   )
   | `Quantity (d, opt) -> (
-    let dec = Vof.Decimal.pack d in
+    let dec = Decimal.pack d in
     match opt with
     | None -> write_int buf dec
     | Some u -> write_array_head buf 2; write_int buf dec; write_text buf u
@@ -272,7 +267,7 @@ let rec encode_val ctx buf = function
   | `Coords (lat, lon) ->
     write_array_head buf 2; write_float buf lat; write_float buf lon
   | `Strmap sm -> write_strmap (encode_val ctx) buf sm
-  | `Intmap im -> write_intmap (encode_val ctx) buf im
+  | `Uintmap im -> write_uintmap (encode_val ctx) buf im
   | `List l | `Series ([] as l) -> write_array (encode_val ctx) buf l
   | `Ndarray (shape, values) ->
     let len = 1 + Array.length values in
@@ -281,49 +276,32 @@ let rec encode_val ctx buf = function
     Array.iter (encode_val ctx buf) values;
     write_array_close buf len
   | `Enum (schema, s) | `Variant (schema, s, []) ->
-    Vof.Context.lookup_id ctx schema.path s |> write_int buf
+    Context.lookup_id ctx schema.path s |> write_int buf
   | `Variant (schema, s, l) ->
     write_array_head buf (1 + List.length l);
-    Vof.Context.lookup_id ctx schema.path s |> write_int buf;
-    List.iter (encode_val ctx) l
+    Context.lookup_id ctx schema.path s |> write_int buf;
+    List.iter (encode_val ctx buf) l
   | `Record (schema, sm) ->
-    let idx = Vof.Context.lookup ctx schema.path in
-    let index_map k v acc = IntMap.add (Vof.Context.idx_id ctx idx k) v acc in
-    let im = Vof.StringMap.fold index_map sm Vof.IntMap.empty in
-    let last = ref (-1) in
-    let incr_len id _ acc =
-      let items = if id = !last + 1 then 1 else 2 in
-      last := id;
-      acc + items
-    in
-    let len = Vof.IntMap.fold incr_len im 0 in
+    let idx = Context.lookup ctx schema.path in
+    let index_map k v acc = IntMap.add (Context.idx_id ctx idx k) v acc in
+    let im = StringMap.fold index_map sm IntMap.empty in
+    let len = IntMap.cardinal im in
+    write_map_open buf len;
+    IntMap.iter (fun id v -> write_int buf id; encode_val ctx buf v) im;
+    write_map_close buf len
+  | `Series (`Record (schema, _) :: _ as rl) ->
+    let fields = series_fields ctx schema rl in
+    let ids = List.map snd fields in
+    let nf = List.length fields in
+    let len = 1 + List.length rl in
     write_array_open buf len;
-    last := -1;
-    let write_field id v =
-      let gap = id - !last - 1 in
-      if gap > 0 then write_spacer buf gap;
-      encode_val ctx buf v;
-      last := id
-    in
-    Vof.IntMap.iter write_field im;
-    write_array_close buf len
-  | `Series (`Record (schema, fst) :: _ as rl) ->
-    let idx = Vof.Context.lookup ctx schema.path in
-    let fl = StringMap.bindings fst |> List.map (fun (k, _) -> k) in
-    let len = 1 + (List.length rl * List.length fl) in
-    write_array_open buf len;
-    List.map (Vof.Context.idx_id ctx idx) fl |> write_array write_int buf;
-    let write_field sm f =
-      match StringMap.find_opt f sm with
-      | Some v -> encode_val ctx buf v
-      | None -> write_null buf
-    in
-    let write_record = function
-      | `Record (_, sm) -> List.iter (write_field sm) fl
-      | _ -> invalid_argument "vof_cbor.encode_val: non-record in series"
+    write_array write_int buf ids;
+    let write_record (`Record (_, sm)) =
+      write_array_open buf nf;
+      List.iter (encode_val ctx buf) (series_row fields sm);
+      write_array_close buf nf
     in
     List.iter write_record rl; write_array_close buf len
-  | `Series _ -> invalid_argument "vof_cbor.encode_val: malformed series"
 ;;
 
 let encode_buf ctx ?(magic = false) ?(buf = Buffer.create 256) v =

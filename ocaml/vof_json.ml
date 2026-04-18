@@ -1,3 +1,5 @@
+open Vof
+
 type t = [
   `Null
   | `Bool of bool
@@ -26,36 +28,21 @@ let js_imin = -9_007_199_254_740_991
 
 let bytes_to_b64url d =
   Bytes.to_string d
-  |> Base64.encode_string ~pad:false ~alphabet:uri_safe_alphabet
-;;
-
-let to_int = function
-  | `Int i -> i
-  | `String s -> int_of_string_opt s
-  | _ -> None
-;;
-
-let to_decimal = function
-  | `String s -> Decimal.of_string s
-  | _ -> Error "invalid decimal"
-;;
-
-let to_ratio = function
-  | `String s -> Ratio.of_string s
-  | _ -> Error "invalid ratio"
+  |> Base64.(encode_string ~pad:false ~alphabet:uri_safe_alphabet)
 ;;
 
 let of_datetime dt =
   `Int
-    ((dt.year * 100000000)
-    + (dt.month * 1000000)
-    + (dt.day * 10000)
-    + (dt.hour * 100)
-    + dt.minute
+    Datetime.(
+      (dt.year * 100000000)
+      + (dt.month * 1000000)
+      + (dt.day * 10000)
+      + (dt.hour * 100)
+      + dt.minute
     )
 ;;
 
-let rec of_vof = function
+let rec of_vof ctx = function
   | `Null -> `Null
   | `Bool b -> `Bool b
   | `Int i | `Uint i | `Timestamp i ->
@@ -64,11 +51,11 @@ let rec of_vof = function
   | `String s -> `String s
   | `Data d -> `String (bytes_to_b64url d)
   | `Enum (_, s) -> `String s
-  | `Variant (_, s, l) -> `List (`String s :: List.map of_vof l)
+  | `Variant (_, s, l) -> `List (`String s :: List.map (of_vof ctx) l)
   | `Decimal d -> `String (Decimal.to_string d)
   | `Ratio r -> `String (Ratio.to_string r)
-  | `Percent (v, p) -> `String (Decimal.to_string (v * 100, p) ^ "%")
-  | `Date d -> `Int (Vof.Date.to_human d)
+  | `Percent p -> `String (Decimal.to_string p ^ "%")
+  | `Date d -> `Int (Date.to_human d)
   | `Datetime dt -> of_datetime dt
   | `Timespan (a, b, c) -> `List [ `Int a; `Int b; `Int c ]
   | `Code s
@@ -100,29 +87,24 @@ let rec of_vof = function
   | `Coords (a, b) -> `List [ `Float a; `Float b ]
   | `Strmap sm | `Record (_, sm) ->
     `Assoc
-      (StringMap.fold (fun k v acc -> (k, of_vof v) :: acc) sm [] |> List.rev)
-  | `Intmap im ->
-    `Assoc
-      (IntMap.fold (fun k v acc -> (Int.to_string k, of_vof v) :: acc) im []
+      (StringMap.fold (fun k v acc -> (k, of_vof ctx v) :: acc) sm []
       |> List.rev
       )
-  | `List l -> `List (List.map of_vof l)
-  | `Ndarray (il, l) ->
-    let sizes = `List (List.map (fun i -> `Int i) il) in
-    `List (sizes :: Array.(map of_vof a |> to_list))
+  | `Uintmap im ->
+    `Assoc
+      (IntMap.fold (fun k v acc -> (Int.to_string k, of_vof ctx v) :: acc) im []
+      |> List.rev
+      )
+  | `List l -> `List (List.map (of_vof ctx) l)
+  | `Ndarray (shape, values) ->
+    let sizes = `List (List.map (fun i -> `Int i) shape) in
+    `List (sizes :: Array.(map (of_vof ctx) values |> to_list))
   | `Series [] -> `List []
-  | `Series (`Record (_, first) :: _ as rl) ->
-    let keys = StringMap.fold (fun k _ acc -> k :: acc) first [] |> List.rev in
-    let header = `List (List.map (fun k -> `String k) keys) in
-    let key_to_json sm k =
-      match StringMap.find_opt k sm with
-      | Some v -> of_vof v
-      | None -> `Null
-    in
+  | `Series (`Record (schema, _) :: _ as rl) ->
+    let fields = series_fields ctx schema rl in
+    let header = `List (List.map (fun (k, _) -> `String k) fields) in
     let row (`Record (_, sm)) =
-      if StringMap.exists (fun k _ -> not (StringMap.mem k first)) sm
-      then failwith "series: unexpected extra fields"
-      else `List (List.map key_to_json sm keys)
+      `List (List.map (of_vof ctx) (series_row fields sm))
     in
     `List (header :: List.map row rl)
 ;;

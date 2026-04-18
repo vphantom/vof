@@ -1,0 +1,18 @@
+(library
+ (name vof)
+ (wrapped false)
+ (modules :standard \ vof_test)
+ (libraries unix base64 ipaddr))
+
+(test
+ (name vof_test)
+ (modules vof_test)
+ (libraries vof))
+
+(env
+ (default
+  (ocamlopt_flags
+   (:standard -O2)))
+ (release
+  (ocamlopt_flags
+   (-O2 -ccopt -s -ccopt -flto -ccopt -Wl,--gc-sections))))

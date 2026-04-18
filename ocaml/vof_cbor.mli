@@ -19,8 +19,8 @@ val decode : ?pos:int -> ?len:int -> string -> (Vof.input * int) option
     into a CBOR string, with optional magic tag prefix if [magic] is true. If
     [buf] is provided, it is appended to, otherwise a new buffer is created. *)
 val encode_buf :
-  Vof.context -> ?magic:bool -> ?buf:Buffer.t -> Vof.t -> Buffer.t
+  Vof.Context.t -> ?magic:bool -> ?buf:Buffer.t -> Vof.t -> Buffer.t
 
 (** [encode_str ctx ?magic v] encodes a VOF value [v] with context [ctx] into a
     CBOR string, with optional magic tag prefix if [magic] is true. *)
-val encode_str : Vof.context -> ?magic:bool -> Vof.t -> string
+val encode_str : Vof.Context.t -> ?magic:bool -> Vof.t -> string

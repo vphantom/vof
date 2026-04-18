@@ -10,10 +10,10 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `bool`            | Boolean                                                       | True, False                          |
 | `list`            | Array                                                         | Array                                |
 | `ndarray`         | Array (nested) <!-- adv -->                                   | `Array[[sizes…], values…]`           |
-| `intmap`          | Object                                                        | Map                                  |
+| `uintmap`         | Object                                                        | Map                                  |
 | `strmap`          | Object                                                        | Map                                  |
 | `variant`/`enum`  | Array[String,values…] / String                                | `list[Int,values…]` / `Int`          |
-| `record`          | Object (keys: names)                                          | `list[values and spacers]`           |
+| `record`          | Object (keys: names)                                          | Map with `uint` keys                 |
 | `series`          | 2D Array (row 0: names) / Empty Array                         | `list[[IDs…], values…]` / `list[]`   |
 | `string`          | String (necessarily UTF-8)                                    | Text                                 |
 | `bytes`/`data`    | String base-64 URL encoded                                    | Bytes                                |
@@ -104,21 +104,21 @@ For example, a 3D array of size 2x2x2 could be: `[[2,2,2],1,2,3,4,5,6,7,8]`
 
 ### Record
 
-In CBOR, records are a list in which fields are positional (field ID 0 in first place, field ID 20 in 21st place, etc.)  Missing fields are replaced by spacers, CBOR Simple values stating how many missing values they represent.  Simple values 0..19 mean skip 1..20 fields, 128..255 mean to skip 21..148 fields.  Omit any trailing spacers when encoding, but tolerate them when decoding.
+In CBOR, records are normal maps with uint keys.
 
-Note that a CBOR Null in a field position explicitly sets the field to Null, which is distinct from being absent using a spacer.
+In VOF Binary, records are a list in which fields are positional (field ID 0 in first place, field ID 20 in 21st place, etc.)  Missing fields are replaced by spacers, CBOR Simple values stating how many missing values they represent.  Simple values 0..19 mean skip 1..20 fields, 128..255 mean to skip 21..148 fields.  Omit any trailing spacers when encoding, but tolerate them when decoding.  For example, a 16-field record with just `{ 0:1, 3:2, 9:3 }` becomes `[1,simple(1),2,simple(4),3]`
 
-For example, a 16-field record with just `{ 0:1, 3:2, 9:3 }` becomes `[1,simple(1),2,simple(4),3]`
+A Null value explicitly sets the field to Null, which is distinct from being absent.
 
 <!-- /advanced -->
 
 ### Series
 
-Compact representation of a list of `record` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON, this is a 2-D Array where the first row selects fields by name and each subsequent row is an Array with just those values.  If numeric field IDs are available, that order should be used instead of alphanumeric, to make field order vary the least over time.
+Compact representation of a list of `record` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON and CBOR, this is a 2-D Array where the first row selects fields by name (by ID in CBOR) and each subsequent row is an Array with just those values.  If numeric field IDs are available, that order should be used instead of alphanumeric, to make field order vary the least over time.
 
 Any field missing from a record is encoded as `Null`.  An empty series must be encoded with a singular empty Array (i.e. `[]` not `[[]]`).
 
-<!-- adv --> In CBOR, this is a flat list where the first item is a list of numeric field IDs and the other items are the values of each record for the selected fields only, one after the other (no wrapping, no spacers).
+<!-- adv --> In VOF Binary, this is a flat list where the first item is a list of numeric field IDs and the other items are the values of each record for the selected fields only, one after the other (no wrapping).
 
 ### Decimal
 
