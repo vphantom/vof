@@ -828,39 +828,13 @@ let series_row fields sm =
 
 (* PATCH *)
 
-(* NOTE: This function is intended for matching ONLY! It does NOT sort in
-   effective value order! We thus rely heavily on Stdlib.compare even for our
-   complex types. *)
 let rec equal (a : t) (b : t) : bool =
   match a, b with
-  | `Null, `Null -> true
-  | `Bool a, `Bool b -> Bool.equal a b
-  | `Int a, `Int b | `Uint a, `Uint b | `Timestamp a, `Timestamp b ->
-    Int.equal a b
   | `Float a, `Float b -> Float.equal a b
-  | `String a, `String b
-  | `Code a, `Code b
-  | `Language a, `Language b
-  | `Country a, `Country b
-  | `Subdivision a, `Subdivision b
-  | `Currency a, `Currency b
-  | `Tax_code a, `Tax_code b
-  | `Unit a, `Unit b -> String.equal a b
-  | `Data a, `Data b | `Ip a, `Ip b -> Bytes.equal a b
+  | `Coords (a1, a2), `Coords (b1, b2) -> Float.equal a1 b1 && Float.equal a2 b2
   | `Enum (_, a), `Enum (_, b) -> String.equal a b
   | `Variant (_, sa, la), `Variant (_, sb, lb) -> (sa, la) = (sb, lb)
-  | `Decimal a, `Decimal b -> a = b
-  | `Ratio a, `Ratio b -> a = b
-  | `Percent a, `Percent b -> a = b
-  | `Date a, `Date b -> a = b
-  | `Datetime a, `Datetime b -> a = b
-  | `Timespan a, `Timespan b -> a = b
   | `Text a, `Text b -> StringMap.equal String.equal a b
-  | `Amount a, `Amount b -> a = b
-  | `Quantity a, `Quantity b -> a = b
-  | `Tax a, `Tax b -> a = b
-  | `Subnet a, `Subnet b -> a = b
-  | `Coords a, `Coords b -> a = b
   | `Strmap a, `Strmap b -> StringMap.equal equal a b
   | `Uintmap a, `Uintmap b -> IntMap.equal equal a b
   | `Record (_, a), `Record (_, b) -> StringMap.equal equal a b
@@ -873,7 +847,7 @@ let rec equal (a : t) (b : t) : bool =
     List.equal
       (fun (`Record (_, a)) (`Record (_, b)) -> StringMap.equal equal a b)
       a b
-  | _, _ -> false
+  | a, b -> a = b
 ;;
 
 let as_records l =
