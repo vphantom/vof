@@ -19,9 +19,9 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `bytes`/`data`    | String base-64 URL encoded                                    | Bytes                                |
 | `uint`            | Number / String if outside MIN/MAX for float64                | Int                                  |
 | `int`/`sint`      | Number / String if outside MIN/MAX for float64                | Int                                  |
-| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | Tagged integer                       |
+| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | Int (see below)                      |
 | `ratio`           | String: optional `-` + digits + `/` + digits                  | `list[int,uint]`                     |
-| `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")               | `dec` hundredths                     |
+| `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")               | `dec` ratio (i.e. 0.5)               |
 | `float`           | Number                                                        | Float                                |
 | `date`/`_on`      | `uint` as `YYYYMMDD`                                          | `list[uint,uint,uint]`               |
 | `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                      | `list[uint,uint,uint,uint,uint]`     |
@@ -108,8 +108,6 @@ In CBOR, records are normal maps with uint keys.
 
 In VOF Binary, records are a list in which fields are positional (field ID 0 in first place, field ID 20 in 21st place, etc.)  Missing fields are replaced by spacers, CBOR Simple values stating how many missing values they represent.  Simple values 0..19 mean skip 1..20 fields, 128..255 mean to skip 21..148 fields.  Omit any trailing spacers when encoding, but tolerate them when decoding.  For example, a 16-field record with just `{ 0:1, 3:2, 9:3 }` becomes `[1,simple(1),2,simple(4),3]`
 
-A Null value explicitly sets the field to Null, which is distinct from being absent.
-
 <!-- /advanced -->
 
 ### Series
@@ -128,7 +126,7 @@ Necessary for financial data.  In JSON, it must be a string to bypass possible f
 
 In CBOR, negatives are handled implicitly.  The value is the significant digits multiplied by 10, plus the number of decimal places.  For example, 2.150 would be 2152.
 
-In VOF Binary, the absolute value is encoded unsigned and an optional `Alt` qualifier is prefixed if the value is negative.  The significant digits are shifted left 2 bits and added a tag representing 0, 2, 4 or 9 decimal places.  For example, 2.150 would be `(215 << 2) + 1 = 861`.
+In VOF Binary, the absolute value is encoded unsigned and an optional `Alt` qualifier is prefixed if the value is negative.  The significant digits are shifted left 2 bits and added a tag representing 0, 2, 4 or 9 decimal places.  For example, 2.123 would require 4 decimal places as `(21230 << 2) + 2 = 84922`.
 
 <!-- /advanced -->
 
@@ -140,7 +138,7 @@ Calendar date, sortable.  Time zone is outside the scope of this type, derived f
 
 In CBOR, it is a 3-uint list containing the full year, month 1..12 and day 1..31.
 
-In VOF Binary, it is structured in 17 bits as `(year << 9) + (month << 5) + day` where:
+In VOF Binary, it is limited to years 1900+ and structured in 17 bits as `(year << 9) + (month << 5) + day` where:
 
 * **year** — Number of years since 1900 (i.e. 2025 is 125)
 * **month** — 1..12
@@ -166,7 +164,7 @@ In VOF Binary, it is structured in 28 bits as `(year << 20) + (month << 16) + (d
 
 ### Timestamp
 
-In VOF Binary, 1,750,750,750 is subtracted from timestamps on the wire.
+In VOF Binary, 1,750,750,750 is subtracted from timestamps on the wire, which makes zero around June 2025 (instead of January 1970) to make typical timestamps smaller.
 
 <!-- /advanced -->
 
@@ -390,7 +388,13 @@ Every HTTP response is a `$msg` record, which consists of a few meta-data fields
 
 Decoders should use the last value when a key is present multiple times.
 
+### Series
+
+Encoders can either pre-scan the full series to collect the possible record fields, which is convenient but breaks streaming ability, or rely on the first record's fields and fail if any subsequent record includes extra fields when streaming is needed.  This is considered an implementation detail.
+
 <!-- advanced -->
+
+### Decoding and Compression
 
 Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceeding 100-200 bytes.  Decoders can always know the format of VOF data by inspecting the first few bytes:
 

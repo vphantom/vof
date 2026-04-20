@@ -243,7 +243,7 @@ let encode_str ctx v =
 let decode ?(pos = 0) ?len src =
   let len = Option.value len ~default:(String.length src - pos) in
   if pos < 0 || len <= 0 || pos + len > String.length src
-  then invalid_arg "vof_bin.decode";
+  then invalid_arg "vof_bin: decode: out of range";
   let limit = pos + len in
   let raw = Bytes.unsafe_of_string src in
   let p = ref pos in

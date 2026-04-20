@@ -36,6 +36,11 @@ let write_int buf i =
   if i >= 0 then write_head buf 0 i else write_head buf 1 (-1 - i)
 ;;
 
+let write_uint buf i =
+  if i < 0 then invalid_arg "vof_cbor: write_uint: negative argument";
+  write_head buf 0 i
+;;
+
 let write_float buf f =
   match Vof_float16.bits_of_float_opt f with
   | Some h -> add_byte buf 0xF9; add_be16 buf h
@@ -60,7 +65,7 @@ let write_text buf s =
 ;;
 
 let write_array_head buf l =
-  if l < 0 || l > 23 then invalid_arg "vof_cbor.write_array_head";
+  if l < 0 || l > 23 then invalid_arg "vof_cbor: write_array_head: out of range";
   write_head buf 4 l
 ;;
 
@@ -104,7 +109,7 @@ let write_uintmap f buf im =
 let decode ?(pos = 0) ?len src =
   let len = Option.value len ~default:(String.length src - pos) in
   if pos < 0 || len <= 0 || pos + len > String.length src
-  then invalid_arg "vof_cbor.decode";
+  then invalid_arg "vof_cbor: decode: out of range";
   let limit = pos + len in
   let raw = Bytes.unsafe_of_string src in
   let p = ref pos in
@@ -218,12 +223,13 @@ let decode ?(pos = 0) ?len src =
 let rec encode_val ctx buf = function
   | `Null -> write_null buf
   | `Bool b -> write_bool buf b
-  | `Int i | `Uint i -> write_int buf i
+  | `Int i -> write_int buf i
+  | `Uint i -> write_uint buf i
   | `Float f -> write_float buf f
   | `String s -> write_text buf s
   | `Data d | `Ip d -> write_bytes buf d
   | `Decimal d -> Decimal.to_n d |> write_int buf
-  | `Ratio (n, d) -> write_array_head buf 2; write_int buf n; write_int buf d
+  | `Ratio (n, d) -> write_array_head buf 2; write_int buf n; write_uint buf d
   | `Percent d -> Decimal.to_n d |> write_int buf
   | `Timestamp ts -> write_int buf ts
   | `Date d ->

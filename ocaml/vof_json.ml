@@ -54,7 +54,7 @@ let rec of_vof ctx = function
   | `Variant (_, s, l) -> `List (`String s :: List.map (of_vof ctx) l)
   | `Decimal d -> `String (Decimal.to_string d)
   | `Ratio r -> `String (Ratio.to_string r)
-  | `Percent p -> `String (Decimal.to_string p ^ "%")
+  | `Percent (v, d) -> `String (Decimal.to_string (v * 100, d) ^ "%")
   | `Date d -> `Int (Date.to_human d)
   | `Datetime dt -> of_datetime dt
   | `Timespan (a, b, c) -> `List [ `Int a; `Int b; `Int c ]

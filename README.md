@@ -46,7 +46,6 @@ Release Candidate 14 - 2026-04-20
 
 ## ROADMAP
 
-- [ ] Record: null vs absent, for PATCH operations, equating them may be undesirable
 - [ ] Test round-trips to try to catch fatal design issues
 - [ ] Create data files to help test all implementations
 - [ ] Have the docs proofread for clarity

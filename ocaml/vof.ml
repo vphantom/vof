@@ -74,7 +74,7 @@ module Decimal = struct
     | a -> Some (optimize (sign * (a / 10), a mod 10))
   ;;
 
-  let of_string s =
+  let of_string ?(shift = 0) s =
     let module B = Buffer in
     let buf = B.create (String.length s) in
     let int_chars = ref (-1) in
@@ -95,7 +95,7 @@ module Decimal = struct
     then B.truncate buf !last_nonzero
     else int_chars := B.length buf;
     let| i = int_of_string_opt (B.contents buf) in
-    Some (i, B.length buf - !int_chars)
+    Some (optimize (i, B.length buf - !int_chars + shift))
   ;;
 
   let to_string (value, dec) =
@@ -514,11 +514,14 @@ module Reader = struct
 
   let percent = function
     | `Percent d -> Some d
-    | `Txt_int i | `Int i | `Uint i -> Some (i, 2)
+    | `Bin_int d -> Some (Decimal.unpack d)
+    | `Vof_int n -> Decimal.of_n n
     | `Txt_str s | `String s ->
       let len = String.length s in
-      if len > 1 && s.[len - 1] = '%' then Decimal.of_string s else None
-    | _ as p -> decimal p
+      if len > 1 && s.[len - 1] = '%'
+      then Decimal.of_string ~shift:2 s
+      else None
+    | _ -> None
   ;;
 
   let timestamp = function
