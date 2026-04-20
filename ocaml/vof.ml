@@ -67,9 +67,11 @@ module Decimal = struct
   ;;
 
   let of_n n =
-    let a = abs n in
     let sign = if n < 0 then -1 else 1 in
-    if a < 10 then None else Some (optimize (sign * (a / 10), a mod 10))
+    match abs n with
+    | 0 -> Some (0, 0)
+    | a when a < 10 -> None
+    | a -> Some (optimize (sign * (a / 10), a mod 10))
   ;;
 
   let of_string s =
