@@ -1,7 +1,10 @@
 # TODO
 
+### Other Tasks
+
+- [ ] Create `select` and `build_msg` API helpers
 - [ ] Create `vof.mli`
-- [ ] See what kind of API helpers we could add to Vof, especially for `select~`.  Any boilerplate we can help reduce (as we did with Reader).
+- [ ] See what other kind of API helpers we could add.  Any boilerplate we can help reduce (as we did with Reader).
 - [ ] Tests, lots and losts of tests...  We might need: alcotest, qcheck, qcheck-alcotest for testing, `bisect_ppx` for coverage reporting, bechamel for benchmarking if we want to also catch performance regressions.  (See my Paragon project for example use of all of those.)
 - [ ] Try a few real-world records for business use, see where the biggest boilerplate pain points are, to see if we can add some helper functions or if maybe a PPX could help significantly.
 

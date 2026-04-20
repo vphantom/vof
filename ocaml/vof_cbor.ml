@@ -222,12 +222,22 @@ let rec encode_val ctx buf = function
   | `Float f -> write_float buf f
   | `String s -> write_text buf s
   | `Data d | `Ip d -> write_bytes buf d
-  | `Decimal d -> Decimal.pack d |> write_int buf
+  | `Decimal d -> Decimal.to_n d |> write_int buf
   | `Ratio (n, d) -> write_array_head buf 2; write_int buf n; write_int buf d
-  | `Percent d -> Decimal.pack d |> write_int buf
-  | `Timestamp ts -> Timestamp.pack ts |> write_int buf
-  | `Date d -> Date.pack d |> write_int buf
-  | `Datetime dt -> Datetime.pack dt |> write_int buf
+  | `Percent d -> Decimal.to_n d |> write_int buf
+  | `Timestamp ts -> write_int buf ts
+  | `Date d ->
+    write_array_head buf 3;
+    write_int buf Date.(d.year);
+    write_int buf d.month;
+    write_int buf d.day
+  | `Datetime dt ->
+    write_array_head buf 5;
+    write_int buf Datetime.(dt.year);
+    write_int buf dt.month;
+    write_int buf dt.day;
+    write_int buf dt.hour;
+    write_int buf dt.minute
   | `Timespan (a, b, c) ->
     write_array_head buf 3; write_int buf a; write_int buf b; write_int buf c
   | `Code s
@@ -239,13 +249,13 @@ let rec encode_val ctx buf = function
   | `Unit s -> write_text buf s
   | `Text tm -> write_strmap write_text buf tm
   | `Amount (d, opt) -> (
-    let dec = Decimal.pack d in
+    let dec = Decimal.to_n d in
     match opt with
     | None -> write_int buf dec
     | Some c -> write_array_head buf 2; write_int buf dec; write_text buf c
   )
   | `Tax (d, curr, tax) -> (
-    let dec = Decimal.pack d in
+    let dec = Decimal.to_n d in
     match tax, curr with
     | Some t, Some c ->
       write_array_head buf 3;
@@ -257,7 +267,7 @@ let rec encode_val ctx buf = function
     | None, _ -> write_int buf dec
   )
   | `Quantity (d, opt) -> (
-    let dec = Decimal.pack d in
+    let dec = Decimal.to_n d in
     match opt with
     | None -> write_int buf dec
     | Some u -> write_array_head buf 2; write_int buf dec; write_text buf u

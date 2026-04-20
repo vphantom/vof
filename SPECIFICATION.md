@@ -1,4 +1,4 @@
-# Vanilla Object Format
+# VOF Specification
 
 ## Data Types
 
@@ -19,13 +19,13 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `bytes`/`data`    | String base-64 URL encoded                                    | Bytes                                |
 | `uint`            | Number / String if outside MIN/MAX for float64                | Int                                  |
 | `int`/`sint`      | Number / String if outside MIN/MAX for float64                | Int                                  |
-| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | `<< 3` + 0..9 places                 |
+| `decimal`/`dec`   | String: optional `-` + 1+ digits + possibly `.` and 1+ digits | Tagged integer                       |
 | `ratio`           | String: optional `-` + digits + `/` + digits                  | `list[int,uint]`                     |
 | `percent`/`pct`   | String: `decimal` hundredths + `%` (i.e. "50%")               | `dec` hundredths                     |
 | `float`           | Number                                                        | Float                                |
-| `date`/`_on`      | `uint` as `YYYYMMDD`                                          | `uint`                               |
-| `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                      | `uint`                               |
-| `timestamp`       | `int` Epoch                                                   | `int` Epoch `- 1,750,750,750`        |
+| `date`/`_on`      | `uint` as `YYYYMMDD`                                          | `list[uint,uint,uint]`               |
+| `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                      | `list[uint,uint,uint,uint,uint]`     |
+| `timestamp`       | `int` Epoch                                                   | `int` UNIX Epoch                     |
 | `timespan`/`span` | `list[int,int,int]`                                           | _same_                               |
 | `code`            | `string` strictly `[A-Z0-9_]`                                 | _same_                               |
 | `language`/`lang` | `code` IETF BCP-47                                            | _same_                               |
@@ -126,11 +126,9 @@ Necessary for financial data.  In JSON, it must be a string to bypass possible f
 
 <!-- advanced -->
 
-In binary formats, the value integer is left-shifted 3 bits to add a tag representing 0, 1, 2, 3, 4, 5, 6 or 9 decimal places.  For example, 2.135 would be `(2135 << 3) + 3 = 17083`.
+In CBOR, negatives are handled implicitly.  The value is the significant digits multiplied by 10, plus the number of decimal places.  For example, 2.150 would be 2152.
 
-In CBOR, negatives are handled implicitly.
-
-In VOF Binary, the absolute value is encoded as an unsigned integer and an optional `Alt` qualifier is prefixed if the value is negative.
+In VOF Binary, the absolute value is encoded unsigned and an optional `Alt` qualifier is prefixed if the value is negative.  The significant digits are shifted left 2 bits and added a tag representing 0, 2, 4 or 9 decimal places.  For example, 2.150 would be `(215 << 2) + 1 = 861`.
 
 <!-- /advanced -->
 
@@ -140,7 +138,9 @@ Calendar date, sortable.  Time zone is outside the scope of this type, derived f
 
 <!-- advanced -->
 
-In CBOR, it is structured in 17 bits as `(year << 9) + (month << 5) + day` where:
+In CBOR, it is a 3-uint list containing the full year, month 1..12 and day 1..31.
+
+In VOF Binary, it is structured in 17 bits as `(year << 9) + (month << 5) + day` where:
 
 * **year** — Number of years since 1900 (i.e. 2025 is 125)
 * **month** — 1..12
@@ -150,17 +150,23 @@ In CBOR, it is structured in 17 bits as `(year << 9) + (month << 5) + day` where
 
 ### Datetime
 
-Extends `date` with wall clock time, still sortable and with implicit time zone.  In JSON, a human-friendly `YYYYMMDDHHMM` number is used to avoid using stings.
+Extends `date` with wall clock time with minute precision, still sortable and with implicit time zone.  In JSON, a human-friendly `YYYYMMDDHHMM` number is used to avoid using stings.
 
 <!-- advanced -->
 
-In CBOR, it is structured with minute precision in 28 bits as `(year << 20) + (month << 16) + (day << 11) + (hour << 6) + minute` where:
+In CBOR, it is a 5-uint list which adds hour 0..23 and minute 0..59.
+
+In VOF Binary, it is structured in 28 bits as `(year << 20) + (month << 16) + (day << 11) + (hour << 6) + minute` where:
 
 * **year** — Number of years since 1900 (i.e. 2025 is 125)
 * **month** — 1..12
 * **day** — 1..31
 * **hour** — 0..23
 * **minute** — 0..59
+
+### Timestamp
+
+In VOF Binary, 1,750,750,750 is subtracted from timestamps on the wire.
 
 <!-- /advanced -->
 

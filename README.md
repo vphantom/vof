@@ -1,4 +1,4 @@
-# Vanilla Object Format
+# VOF
 
 [![license](https://img.shields.io/github/license/vphantom/vof.svg?style=plastic)]()
 
@@ -29,7 +29,7 @@ Goals specific to CBOR and VOF Binary:
 * Streamable
 * Very compact record type
 
-The name "vanilla" was chosen to symbolize the aim to keep the format as simple and generic as possible.
+The name "vanilla" was chosen to symbolize the aim to keep the format as simple and generic as possible, thus "Vanilla Object Format" initially when VOF Binary was created, which became "Vanilla Object Framework" as the project grew, and now simply "VOF".
 
 ## Version Control Strategy
 
@@ -42,7 +42,7 @@ To help with schema evolution, VOF specifies namespace files to be shared betwee
 
 ### Specification Status
 
-Release Candidate 13 - 2026-04-18
+Release Candidate 14 - 2026-04-20
 
 ## ROADMAP
 

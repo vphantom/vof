@@ -3,9 +3,9 @@ module IntMap = Map.Make (Int)
 
 let ( let| ) = Option.bind
 
-type schema = { path: string; keys: string list }
+type schema = { path: string; keys: string list; required: string list }
 
-let make_schema ?(keys = []) path = { path; keys }
+let make_schema ?(keys = []) ?(required = []) path = { path; keys; required }
 
 let both_opt = function
   | Some a, Some b -> Some (a, b)
@@ -23,100 +23,53 @@ let rec stringmap_zip sm ks vs =
   | _ -> sm
 ;;
 
-module Context = struct
-  type index = {
-    mutable sym_ids: int StringMap.t;
-    mutable id_syms: string array;
-  }
-
-  type t = {
-    update: bool;
-    mutable modified: bool;
-    root: string;
-    mutable registry: index StringMap.t;
-  }
-
-  let idx_make () = { sym_ids = StringMap.empty; id_syms = [||] }
-
-  let idx_id ctx idx s =
-    match ctx.update, StringMap.find_opt s idx.sym_ids with
-    | false, None -> assert false
-    | true, None ->
-      let id = Array.length idx.id_syms in
-      idx.id_syms <- Array.append idx.id_syms [| s |];
-      idx.sym_ids <- StringMap.add s id idx.sym_ids;
-      id
-    | _, Some id -> id
-  ;;
-
-  let idx_sym idx id =
-    if id < 0 || id >= Array.length idx.id_syms
-    then None
-    else Some (Array.unsafe_get idx.id_syms id)
-  ;;
-
-  let make ?(update = false) root =
-    { update; modified = false; root; registry = StringMap.empty }
-  ;;
-
-  let add ctx path =
-    if not ctx.update then assert false;
-    let idx = idx_make () in
-    ctx.registry <- StringMap.add path idx ctx.registry;
-    idx
-  ;;
-
-  let lookup ctx path =
-    match StringMap.find_opt path ctx.registry with
-    | None -> add ctx path
-    | Some idx -> idx
-  ;;
-
-  let lookup_id ctx path s =
-    let idx = lookup ctx path in
-    idx_id ctx idx s
-  ;;
-
-  (* Remember to strip the root and '.' from each namespace. *)
-  let load ?(update = false) root path =
-    ignore (update, root, path);
-    failwith "unimplemented"
-  ;;
-
-  (* Remember to prepend the root to each namespace. *)
-  let save ctx =
-    if not ctx.update then assert false;
-    if ctx.modified then failwith "unimplemented"
-  ;;
-end
-
 module Decimal = struct
   type t = int * int
 
   let[@inline] optimize (value, dec) =
-    let value, dec = ref value, ref dec in
-    while !dec > 0 && !value mod 10 = 0 do
-      value := !value / 10;
-      decr dec
-    done;
-    !value, !dec
+    let rec loop v d =
+      if d > 0 && v mod 10 = 0 then loop (v / 10) (d - 1) else v, d
+    in
+    loop value dec
   ;;
 
   let pack (value, dec) =
     let value, dec = optimize (value, dec) in
     match dec with
-    | _ when dec >= 0 && dec <= 6 -> (value lsl 3) lor dec
-    | 7 -> ((value * 100) lsl 3) lor 7
-    | 8 -> ((value * 10) lsl 3) lor 7
-    | 9 -> (value lsl 3) lor 7
+    | 0 -> value lsl 2
+    | 1 -> ((value * 10) lsl 2) lor 1
+    | 2 -> (value lsl 2) lor 1
+    | 3 -> ((value * 10) lsl 2) lor 2
+    | 4 -> (value lsl 2) lor 2
+    | 5 -> ((value * 10000) lsl 2) lor 3
+    | 6 -> ((value * 1000) lsl 2) lor 3
+    | 7 -> ((value * 100) lsl 2) lor 3
+    | 8 -> ((value * 10) lsl 2) lor 3
+    | 9 -> (value lsl 2) lor 3
     | _ -> failwith "Vof.Decimal.pack: unsupported decimal places"
   ;;
 
   let unpack n =
-    let dec = n land 7 in
-    let value = n asr 3 in
-    let value, dec = if dec <= 6 then value, dec else value, 9 in
-    optimize (value, dec)
+    let value = n asr 2 in
+    match n land 3 with
+    | 0 -> value, 0
+    | 1 -> optimize (value, 2)
+    | 2 -> optimize (value, 4)
+    | 3 -> optimize (value, 9)
+    | _ -> assert false
+  ;;
+
+  let to_n (value, dec) =
+    if dec < 0 || dec > 9
+    then failwith "Vof.Decimal.to_n: unsupported decimal places";
+    let value, dec = optimize (value, dec) in
+    if value < 0 then (value * 10) - dec else (value * 10) + dec
+  ;;
+
+  let of_n n =
+    let a = abs n in
+    let sign = if n < 0 then -1 else 1 in
+    if a < 10 then None else Some (optimize (sign * (a / 10), a mod 10))
   ;;
 
   let of_string s =
@@ -385,17 +338,90 @@ type input = [
   | `Vof_tag of int * input
 ] [@@ocamlformat "disable"]
 
-type 'k cache = ('k, t) Hashtbl.t
+module Context = struct
+  type index = {
+    mutable sym_ids: int StringMap.t;
+    mutable id_syms: string array;
+  }
 
-let make_cache () = Hashtbl.create 32
+  type t = {
+    update: bool;
+    mutable modified: bool;
+    root: string;
+    mutable registry: index StringMap.t;
+    mutable fetchers: (record -> record option) StringMap.t;
+  }
 
-let cached cache key f =
-  match Hashtbl.find_opt cache key with
-  | Some v -> v
-  | None ->
-    let v = f () in
-    Hashtbl.add cache key v; v
-;;
+  let add_fetchers ctx fl =
+    let add sm (k, v) = StringMap.add k v sm in
+    ctx.fetchers <- List.fold_left add ctx.fetchers fl
+  ;;
+
+  let idx_make () = { sym_ids = StringMap.empty; id_syms = [||] }
+
+  let idx_id ctx idx s =
+    match ctx.update, StringMap.find_opt s idx.sym_ids with
+    | false, None -> assert false
+    | true, None ->
+      let id = Array.length idx.id_syms in
+      idx.id_syms <- Array.append idx.id_syms [| s |];
+      idx.sym_ids <- StringMap.add s id idx.sym_ids;
+      id
+    | _, Some id -> id
+  ;;
+
+  let idx_sym idx id =
+    if id < 0 || id >= Array.length idx.id_syms
+    then None
+    else Some (Array.unsafe_get idx.id_syms id)
+  ;;
+
+  let make ?(update = false) root =
+    {
+      update;
+      modified = false;
+      root;
+      registry = StringMap.empty;
+      fetchers = StringMap.empty;
+    }
+  ;;
+
+  let add ctx path =
+    if not ctx.update then assert false;
+    let idx = idx_make () in
+    ctx.registry <- StringMap.add path idx ctx.registry;
+    idx
+  ;;
+
+  let lookup ctx path =
+    match StringMap.find_opt path ctx.registry with
+    | None -> add ctx path
+    | Some idx -> idx
+  ;;
+
+  let lookup_id ctx path s =
+    let idx = lookup ctx path in
+    idx_id ctx idx s
+  ;;
+
+  (* Remember to strip the root and '.' from each namespace. *)
+  let load ?(update = false) root path =
+    ignore (update, root, path);
+    failwith "unimplemented"
+  ;;
+
+  (* Remember to prepend the root to each namespace. *)
+  let save ctx =
+    if not ctx.update then assert false;
+    if ctx.modified then failwith "unimplemented"
+  ;;
+end
+
+module KeyMap = Map.Make (struct
+  type nonrec t = t list
+
+  let compare = Stdlib.compare
+end)
 
 module Reader = struct
   (* NOTE: Null not useful here *)
@@ -467,7 +493,8 @@ module Reader = struct
 
   let decimal = function
     | `Decimal d -> Some d
-    | `Bin_int n | `Vof_int n -> Some (Decimal.unpack n)
+    | `Bin_int n -> Decimal.of_n n
+    | `Vof_int n -> Some (Decimal.unpack n)
     | `Vof_tag (-1, `Vof_int n) -> Some (Decimal.unpack (-n))
     | `Bin_str s | `Txt_str s | `String s -> Decimal.of_string s
     | _ -> None
@@ -494,8 +521,8 @@ module Reader = struct
 
   let timestamp = function
     | `Timestamp ts -> Some ts
-    | `Bin_int n -> Some (Timestamp.unpack n)
-    | `Vof_int n -> Some (Timestamp.unpack n |> zigzag)
+    | `Bin_int n -> Some n
+    | `Vof_int n -> Some (zigzag n |> Timestamp.unpack)
     | `Txt_int n | `Int n -> Some n
     | `Txt_str s | `String s -> int_of_string_opt s
     | _ -> None
@@ -508,6 +535,12 @@ module Reader = struct
     | `Txt_str s ->
       let| n = int_of_string_opt s in
       Date.of_human n
+    | `Txt_list [ y; m; d ]
+    | `Bin_list [ y; m; d ]
+    | `Vof_list [ y; m; d ]
+    | `List [ y; m; d ] ->
+      let| y, m, d = three_opt (int y, int m, int d) in
+      Some { Date.year = y; month = m; day = d }
     | _ -> None
   ;;
 
@@ -518,6 +551,13 @@ module Reader = struct
     | `Txt_str s ->
       let| n = int_of_string_opt s in
       Datetime.of_human n
+    | `Txt_list [ y; m; d; h; min ]
+    | `Bin_list [ y; m; d; h; min ]
+    | `Vof_list [ y; m; d; h; min ]
+    | `List [ y; m; d; h; min ] ->
+      let| y, m, d = three_opt (int y, int m, int d) in
+      let| h, min = both_opt (int h, int min) in
+      Some { Datetime.year = y; month = m; day = d; hour = h; minute = min }
     | _ -> None
   ;;
 
@@ -858,12 +898,6 @@ let as_records l =
       )
     l
 ;;
-
-module KeyMap = Map.Make (struct
-  type nonrec t = t list
-
-  let compare = Stdlib.compare
-end)
 
 let rec diff (`Record (sa, a)) (`Record (_, b)) =
   let is_key k = List.mem k sa.keys in
