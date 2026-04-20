@@ -71,8 +71,8 @@ let rec of_vof ctx = function
   | `Amount (d, None) | `Quantity (d, None) -> `String (Decimal.to_string d)
   | `Amount (d, Some s) | `Quantity (d, Some s) ->
     `String (Decimal.to_string d ^ " " ^ s)
-  | `Tax (d, c, t) ->
-    let parts = Some (Decimal.to_string d) :: [ c; t ] in
+  | `Tax (d, t, c) ->
+    let parts = Some (Decimal.to_string d) :: [ c; Some t ] in
     `String (String.concat " " (List.filter_map Fun.id parts))
   | `Ip ip -> (
     match Bytes.unsafe_to_string ip |> Ipaddr.of_octets with

@@ -254,17 +254,15 @@ let rec encode_val ctx buf = function
     | None -> write_int buf dec
     | Some c -> write_array_head buf 2; write_int buf dec; write_text buf c
   )
-  | `Tax (d, curr, tax) -> (
+  | `Tax (d, tax, curr) -> (
     let dec = Decimal.to_n d in
-    match tax, curr with
-    | Some t, Some c ->
+    match curr with
+    | Some c ->
       write_array_head buf 3;
       write_int buf dec;
-      write_text buf t;
+      write_text buf tax;
       write_text buf c
-    | Some t, None ->
-      write_array_head buf 2; write_int buf dec; write_text buf t
-    | None, _ -> write_int buf dec
+    | None -> write_array_head buf 2; write_int buf dec; write_text buf tax
   )
   | `Quantity (d, opt) -> (
     let dec = Decimal.to_n d in

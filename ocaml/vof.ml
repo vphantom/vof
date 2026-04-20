@@ -309,7 +309,7 @@ type t = [
   | `Unit of string
   | `Text of string StringMap.t
   | `Amount of Decimal.t * string option
-  | `Tax of Decimal.t * string option * string option
+  | `Tax of Decimal.t * string * string option
   | `Quantity of Decimal.t * string option
   | `Ip of bytes
   | `Subnet of bytes * int
@@ -599,26 +599,22 @@ module Reader = struct
     | `Tax t -> Some t
     | `Bin_list [ d; t ] | `Vof_list [ d; t ] -> (
       match decimal d, string t with
-      | Some d, Some t -> Some (d, None, Some t)
+      | Some d, Some t -> Some (d, t, None)
       | _ -> None
     )
     | `Bin_list [ d; t; c ] | `Vof_list [ d; t; c ] -> (
       match decimal d, string t, string c with
-      | Some d, Some t, Some c -> Some (d, Some c, Some t)
+      | Some d, Some t, Some c -> Some (d, t, Some c)
       | _ -> None
     )
     | `Txt_str s | `String s -> (
       match String.split_on_char ' ' s with
-      | [ ds ] -> Decimal.of_string ds |> Option.map (fun d -> d, None, None)
-      | [ ds; ts ] ->
-        Decimal.of_string ds |> Option.map (fun d -> d, None, Some ts)
-      | [ ds; cs; ts ] ->
-        Decimal.of_string ds |> Option.map (fun d -> d, Some cs, Some ts)
+      | [ ds; ts ] -> Decimal.of_string ds |> Option.map (fun d -> d, ts, None)
+      | [ ds; ts; cs ] ->
+        Decimal.of_string ds |> Option.map (fun d -> d, ts, Some cs)
       | _ -> None
     )
-    | `Bin_list [ d ] | `Vof_list [ d ] | `List [ d ] | d ->
-      let| d = decimal d in
-      Some (d, None, None)
+    | _ -> None
   ;;
 
   let coords = function

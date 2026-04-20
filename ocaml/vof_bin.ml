@@ -160,20 +160,19 @@ let rec encode_val ctx buf = function
       write_string buf s;
       write_list_close buf 2
   )
-  | `Tax (d, curr, tax) -> (
-    match tax, curr with
-    | Some t, Some c ->
+  | `Tax (d, tax, curr) -> (
+    match curr with
+    | Some c ->
       write_list_open buf 3;
       write_decimal buf d;
-      write_string buf t;
+      write_string buf tax;
       write_string buf c;
       write_list_close buf 3
-    | Some t, None ->
+    | None ->
       write_list_open buf 2;
       write_decimal buf d;
-      write_string buf t;
+      write_string buf tax;
       write_list_close buf 2
-    | None, _ -> write_decimal buf d
   )
   | `Subnet (ip, len) ->
     write_list_open buf 2;
