@@ -1,4 +1,6 @@
 open Vof
+open Vof_enc
+open Vof_lib
 
 type t = [
   `Null
@@ -33,12 +35,11 @@ let bytes_to_b64url d =
 
 let of_datetime dt =
   `Int
-    Datetime.(
-      (dt.year * 100000000)
-      + (dt.month * 1000000)
-      + (dt.day * 10000)
-      + (dt.hour * 100)
-      + dt.minute
+    ((dt.year * 100000000)
+    + (dt.month * 1000000)
+    + (dt.day * 10000)
+    + (dt.hour * 100)
+    + dt.minute
     )
 ;;
 
@@ -55,7 +56,7 @@ let rec of_vof ctx = function
   | Decimal d -> `String (Decimal.to_string d)
   | Ratio r -> `String (Ratio.to_string r)
   | Percent (v, d) -> `String (Decimal.to_string (v * 100, d) ^ "%")
-  | Date d -> `Int (Date.to_human d)
+  | Date d -> `Int (Date.to_human (d.year, d.month, d.day))
   | Datetime dt -> of_datetime dt
   | Timespan (a, b, c) -> `List [ `Int a; `Int b; `Int c ]
   | Code s

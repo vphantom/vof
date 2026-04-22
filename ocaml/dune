@@ -2,6 +2,7 @@
  (name vof)
  (wrapped false)
  (modules :standard \ vof_test)
+ (private_modules vof_enc vof_lib)
  (libraries unix base64 ipaddr))
 
 (test

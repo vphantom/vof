@@ -1,3 +1,4 @@
+open Vof_lib
 module StringSet = Set.Make (String)
 module StringMap = Map.Make (String)
 module IntMap = Map.Make (Int)
@@ -26,267 +27,10 @@ let rec stringmap_zip sm ks vs =
   | _ -> sm
 ;;
 
-module Decimal = struct
-  type t = int * int
-
-  let[@inline] optimize (value, dec) =
-    let rec loop v d =
-      if d > 0 && v mod 10 = 0 then loop (v / 10) (d - 1) else v, d
-    in
-    loop value dec
-  ;;
-
-  let pack (value, dec) =
-    let value, dec = optimize (value, dec) in
-    match dec with
-    | 0 -> value lsl 2
-    | 1 -> ((value * 10) lsl 2) lor 1
-    | 2 -> (value lsl 2) lor 1
-    | 3 -> ((value * 10) lsl 2) lor 2
-    | 4 -> (value lsl 2) lor 2
-    | 5 -> ((value * 10000) lsl 2) lor 3
-    | 6 -> ((value * 1000) lsl 2) lor 3
-    | 7 -> ((value * 100) lsl 2) lor 3
-    | 8 -> ((value * 10) lsl 2) lor 3
-    | 9 -> (value lsl 2) lor 3
-    | _ -> invalid_arg "Vof.Decimal.pack: unsupported decimal places"
-  ;;
-
-  let unpack n =
-    let value = n asr 2 in
-    match n land 3 with
-    | 0 -> value, 0
-    | 1 -> optimize (value, 2)
-    | 2 -> optimize (value, 4)
-    | 3 -> optimize (value, 9)
-    | _ -> assert false
-  ;;
-
-  let to_n (value, dec) =
-    if dec < 0 || dec > 9
-    then invalid_arg "Vof.Decimal.to_n: unsupported decimal places";
-    let value, dec = optimize (value, dec) in
-    if value < 0 then (value * 10) - dec else (value * 10) + dec
-  ;;
-
-  let of_n n =
-    let sign = if n < 0 then -1 else 1 in
-    match abs n with
-    | 0 -> Some (0, 0)
-    | a when a < 10 -> None
-    | a -> Some (optimize (sign * (a / 10), a mod 10))
-  ;;
-
-  let of_string ?(shift = 0) s =
-    let module B = Buffer in
-    let buf = B.create (String.length s) in
-    let int_chars = ref (-1) in
-    let last_nonzero = ref 0 in
-    let check_char c =
-      match c with
-      | '-' | '0' -> B.add_char buf c
-      | '1' .. '9' ->
-        B.add_char buf c;
-        last_nonzero := B.length buf
-      | '.' ->
-        int_chars := B.length buf;
-        last_nonzero := B.length buf
-      | _ -> ()
-    in
-    String.iter check_char s;
-    if !int_chars >= 0
-    then B.truncate buf !last_nonzero
-    else int_chars := B.length buf;
-    let| i = int_of_string_opt (B.contents buf) in
-    Some (optimize (i, B.length buf - !int_chars + shift))
-  ;;
-
-  let to_string (value, dec) =
-    let build scale =
-      let i = value / scale in
-      let f = abs (value mod scale) in
-      if f = 0
-      then Int.to_string i
-      else (
-        let prefix = if value < 0 && i = 0 then "-0" else Int.to_string i in
-        let s = Printf.sprintf "%s.%0*d" prefix dec f in
-        let len = ref (String.length s) in
-        while !len > 1 && s.[!len - 1] = '0' do
-          decr len
-        done;
-        String.sub s 0 !len
-      )
-    in
-    match dec with
-    | 0 -> Int.to_string value
-    | 1 -> build 10
-    | 2 -> build 100
-    | 3 -> build 1000
-    | 4 -> build 10000
-    | 5 -> build 100000
-    | 6 -> build 1000000
-    | 7 -> build 10000000
-    | 8 -> build 100000000
-    | 9 -> build 1000000000
-    | _ -> invalid_arg "decimals must be 0..9"
-  ;;
-end
-
-module Ratio = struct
-  type t = int * int
-
-  let of_string s =
-    match String.split_on_char '/' s with
-    | [ num; den ] -> (
-      match int_of_string_opt num, int_of_string_opt den with
-      | Some n, Some d when d > 0 -> Some (n, d)
-      | Some _, Some _ -> None
-      | _ -> None
-    )
-    | _ -> None
-  ;;
-
-  let to_string (n, d) = Printf.sprintf "%d/%d" n d
-end
-
-module Date = struct
-  type t = { year: int; month: int; day: int }
-
-  let pack d = ((d.year - 1900) lsl 9) lor (d.month lsl 5) lor d.day
-
-  let unpack i =
-    let d =
-      { year = (i lsr 9) + 1900; month = (i lsr 5) land 15; day = i land 31 }
-    in
-    if d.month >= 1 && d.month <= 12 && d.day >= 1 && d.day <= 31
-    then Some d
-    else None
-  ;;
-
-  let of_tm tm =
-    Unix.{ year = tm.tm_year + 1900; month = tm.tm_mon + 1; day = tm.tm_mday }
-  ;;
-
-  let to_tm { year; month; day } =
-    Unix.
-      {
-        tm_year = year - 1900;
-        tm_mon = month - 1;
-        tm_mday = day;
-        tm_hour = 0;
-        tm_min = 0;
-        tm_sec = 0;
-        tm_wday = 0;
-        tm_yday = 0;
-        tm_isdst = false;
-      }
-  ;;
-
-  let to_human d = (d.year * 10000) + (d.month * 100) + d.day
-
-  let of_human n =
-    let y = n / 10000
-    and m = n mod 10000 / 100
-    and d = n mod 100 in
-    if y >= 1000 && y <= 9999 && m >= 1 && m <= 12 && d >= 1 && d <= 31
-    then Some { year = y; month = m; day = d }
-    else None
-  ;;
-end
-
-module Datetime = struct
-  type t = { year: int; month: int; day: int; hour: int; minute: int }
-
-  let pack dt =
-    ((dt.year - 1900) lsl 20)
-    lor (dt.month lsl 16)
-    lor (dt.day lsl 11)
-    lor (dt.hour lsl 6)
-    lor dt.minute
-  ;;
-
-  let unpack i =
-    let dt =
-      {
-        year = (i lsr 20) + 1900;
-        month = (i lsr 16) land 15;
-        day = (i lsr 11) land 31;
-        hour = (i lsr 6) land 63;
-        minute = i land 63;
-      }
-    in
-    if
-      dt.month >= 1
-      && dt.month <= 12
-      && dt.day >= 1
-      && dt.day <= 31
-      && dt.hour <= 23
-      && dt.minute <= 59
-    then Some dt
-    else None
-  ;;
-
-  let of_tm tm =
-    Unix.
-      {
-        year = tm.tm_year + 1900;
-        month = tm.tm_mon + 1;
-        day = tm.tm_mday;
-        hour = tm.tm_hour;
-        minute = tm.tm_min;
-      }
-  ;;
-
-  let to_tm { year; month; day; hour; minute } =
-    Unix.
-      {
-        tm_year = year - 1900;
-        tm_mon = month - 1;
-        tm_mday = day;
-        tm_hour = hour;
-        tm_min = minute;
-        tm_sec = 0;
-        tm_wday = 0;
-        tm_yday = 0;
-        tm_isdst = false;
-      }
-  ;;
-
-  let to_human dt =
-    (dt.year * 100000000)
-    + (dt.month * 1000000)
-    + (dt.day * 10000)
-    + (dt.hour * 100)
-    + dt.minute
-  ;;
-
-  let of_human n =
-    let y = n / 100_000_000
-    and m = n / 1_000_000 mod 100
-    and d = n / 10_000 mod 100
-    and h = n / 100 mod 100
-    and min = n mod 100 in
-    if
-      y >= 1000
-      && y <= 9999
-      && m >= 1
-      && m <= 12
-      && d >= 1
-      && d <= 31
-      && h <= 23
-      && min <= 59
-    then Some { year = y; month = m; day = d; hour = h; minute = min }
-    else None
-  ;;
-end
-
-module Timestamp = struct
-  type t = int
-
-  let offset = 1_750_750_750
-  let pack ts = ts - offset
-  let unpack p = p + offset
-end
+type decimal = int * int
+type ratio = int * int
+type date = { year: int; month: int; day: int }
+type datetime = { year: int; month: int; day: int; hour: int; minute: int }
 
 type t =
   | Null
@@ -298,12 +42,12 @@ type t =
   | Data of bytes
   | Enum of schema * string
   | Variant of schema * string * t list
-  | Decimal of Decimal.t
-  | Ratio of Ratio.t
-  | Percent of Decimal.t
+  | Decimal of decimal
+  | Ratio of ratio
+  | Percent of decimal
   | Timestamp of int
-  | Date of Date.t
-  | Datetime of Datetime.t
+  | Date of date
+  | Datetime of datetime
   | Timespan of int * int * int
   | Code of string
   | Language of string
@@ -313,9 +57,9 @@ type t =
   | Tax_code of string
   | Unit of string
   | Text of string StringMap.t
-  | Amount of Decimal.t * string option
-  | Tax of Decimal.t * string * string option
-  | Quantity of Decimal.t * string option
+  | Amount of decimal * string option
+  | Tax of decimal * string * string option
+  | Quantity of decimal * string option
   | Ip of bytes
   | Subnet of bytes * int
   | Coords of float * float
@@ -523,32 +267,43 @@ module Reader = struct
     | _ -> None
   ;;
 
-  let date = function
+  let date d =
+    let conv = function
+      | Some (y, m, d) -> Some { year = y; month = m; day = d }
+      | None -> None
+    in
+    match d with
     | Date d -> Some d
-    | Raw_bint n | Raw_int n | Int n | Uint n -> Date.unpack n
-    | Raw_tint n -> Date.of_human n
+    | Raw_bint n | Raw_int n | Int n | Uint n -> Date.unpack n |> conv
+    | Raw_tint n -> Date.of_human n |> conv
     | Raw_tstr s ->
       let| n = int_of_string_opt s in
-      Date.of_human n
+      Date.of_human n |> conv
     | Raw_tlist [ y; m; d ] | Raw_blist [ y; m; d ] | Raw_list [ y; m; d ] ->
-      let| y, m, d = three_opt (int y, int m, int d) in
-      Some { Date.year = y; month = m; day = d }
+      let| year, month, day = three_opt (int y, int m, int d) in
+      Some { year; month; day }
     | _ -> None
   ;;
 
-  let datetime = function
+  let datetime dt =
+    let conv = function
+      | Some (y, m, d, hh, mm) ->
+        Some { year = y; month = m; day = d; hour = hh; minute = mm }
+      | None -> None
+    in
+    match dt with
     | Datetime dt -> Some dt
-    | Raw_bint n | Raw_int n | Int n | Uint n -> Datetime.unpack n
-    | Raw_tint n -> Datetime.of_human n
+    | Raw_bint n | Raw_int n | Int n | Uint n -> Datetime.unpack n |> conv
+    | Raw_tint n -> Datetime.of_human n |> conv
     | Raw_tstr s ->
       let| n = int_of_string_opt s in
-      Datetime.of_human n
-    | Raw_tlist [ y; m; d; h; min ]
-    | Raw_blist [ y; m; d; h; min ]
-    | Raw_list [ y; m; d; h; min ] ->
-      let| y, m, d = three_opt (int y, int m, int d) in
-      let| h, min = both_opt (int h, int min) in
-      Some { Datetime.year = y; month = m; day = d; hour = h; minute = min }
+      Datetime.of_human n |> conv
+    | Raw_tlist [ y; m; d; hh; mm ]
+    | Raw_blist [ y; m; d; hh; mm ]
+    | Raw_list [ y; m; d; hh; mm ] ->
+      let| year, month, day = three_opt (int y, int m, int d) in
+      let| hour, minute = both_opt (int hh, int mm) in
+      Some { year; month; day; hour; minute }
     | _ -> None
   ;;
 
@@ -820,30 +575,6 @@ module Reader = struct
     | _ -> None
   ;;
 end
-
-let series_fields ctx schema records =
-  let idx = Context.lookup ctx schema.path in
-  let collect acc (_, sm) =
-    StringMap.fold (fun k _ a -> StringMap.add k () a) sm acc
-  in
-  let all = List.fold_left collect StringMap.empty records in
-  let pairs =
-    StringMap.fold
-      (fun name () acc -> (name, Context.idx_id ctx idx name) :: acc)
-      all []
-  in
-  List.sort (fun (_, a) (_, b) -> Int.compare a b) pairs
-;;
-
-let series_row fields sm =
-  List.map
-    (fun (name, _) ->
-      match StringMap.find_opt name sm with
-      | Some v -> v
-      | None -> Null
-    )
-    fields
-;;
 
 let rec equal (a : t) (b : t) : bool =
   match a, b with

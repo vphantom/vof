@@ -1,4 +1,6 @@
 open Vof
+open Vof_enc
+open Vof_lib
 
 let[@inline] add_byte buf n = Buffer.add_char buf (Char.chr (n land 0xFF))
 let[@inline] add_le16 buf n = Buffer.add_uint16_le buf n
@@ -134,8 +136,10 @@ let rec encode_val ctx buf = function
     write_uint buf d;
     write_list_close buf 2
   | Timestamp ts -> Timestamp.pack ts |> write_sint buf
-  | Date d -> Date.pack d |> write_uint buf
-  | Datetime dt -> Datetime.pack dt |> write_uint buf
+  | Date d -> Date.pack (d.year, d.month, d.day) |> write_uint buf
+  | Datetime dt ->
+    Datetime.pack (dt.year, dt.month, dt.day, dt.hour, dt.minute)
+    |> write_uint buf
   | Timespan (a, b, c) ->
     write_list_open buf 3;
     write_sint buf a;
