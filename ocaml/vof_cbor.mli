@@ -13,7 +13,7 @@
 
 (** [decode ?pos ?len s] decodes a VOF raw value from the CBOR-encoded string
     [s]. *)
-val decode : ?pos:int -> ?len:int -> string -> (Vof.input * int) option
+val decode : ?pos:int -> ?len:int -> string -> (Vof.t * int) option
 
 (** [encode_buf ctx ?magic ?buf v] encodes a VOF value [v] with context [ctx]
     into a CBOR string, with optional magic tag prefix if [magic] is true. If

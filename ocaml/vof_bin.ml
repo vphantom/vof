@@ -121,37 +121,38 @@ let write_uintmap f buf im =
 ;;
 
 let rec encode_val ctx buf = function
-  | `Null -> write_null buf
-  | `Bool b -> write_uint buf (if b then 1 else 0)
-  | `Int i -> write_sint buf i
-  | `Uint i -> write_uint buf i
-  | `Float f -> write_float buf f
-  | `String s -> write_string buf s
-  | `Data d | `Ip d -> write_data buf d
-  | `Decimal d | `Percent d -> write_decimal buf d
-  | `Ratio (n, d) ->
+  | Null -> write_null buf
+  | Bool b -> write_uint buf (if b then 1 else 0)
+  | Int i -> write_sint buf i
+  | Uint i -> write_uint buf i
+  | Float f -> write_float buf f
+  | Data d | Ip d -> write_data buf d
+  | Decimal d | Percent d -> write_decimal buf d
+  | Ratio (n, d) ->
     write_list_open buf 2;
     write_sint buf n;
     write_uint buf d;
     write_list_close buf 2
-  | `Timestamp ts -> Timestamp.pack ts |> write_sint buf
-  | `Date d -> Date.pack d |> write_uint buf
-  | `Datetime dt -> Datetime.pack dt |> write_uint buf
-  | `Timespan (a, b, c) ->
+  | Timestamp ts -> Timestamp.pack ts |> write_sint buf
+  | Date d -> Date.pack d |> write_uint buf
+  | Datetime dt -> Datetime.pack dt |> write_uint buf
+  | Timespan (a, b, c) ->
     write_list_open buf 3;
     write_sint buf a;
     write_sint buf b;
     write_sint buf c;
     write_list_close buf 3
-  | `Code s
-  | `Language s
-  | `Country s
-  | `Subdivision s
-  | `Currency s
-  | `Tax_code s
-  | `Unit s -> write_string buf s
-  | `Text tm -> write_strmap write_string buf tm
-  | `Amount (d, opt) | `Quantity (d, opt) -> (
+  | String s
+  | Raw_bstr s
+  | Code s
+  | Language s
+  | Country s
+  | Subdivision s
+  | Currency s
+  | Tax_code s
+  | Unit s -> write_string buf s
+  | Text tm -> write_strmap write_string buf tm
+  | Amount (d, opt) | Quantity (d, opt) -> (
     match opt with
     | None -> write_decimal buf d
     | Some s ->
@@ -160,7 +161,7 @@ let rec encode_val ctx buf = function
       write_string buf s;
       write_list_close buf 2
   )
-  | `Tax (d, tax, curr) -> (
+  | Tax (d, tax, curr) -> (
     match curr with
     | Some c ->
       write_list_open buf 3;
@@ -174,34 +175,34 @@ let rec encode_val ctx buf = function
       write_string buf tax;
       write_list_close buf 2
   )
-  | `Subnet (ip, len) ->
+  | Subnet (ip, len) ->
     write_list_open buf 2;
     write_data buf ip;
     write_uint buf len;
     write_list_close buf 2
-  | `Coords (lat, lon) ->
+  | Coords (lat, lon) ->
     write_list_open buf 2;
     write_float buf lat;
     write_float buf lon;
     write_list_close buf 2
-  | `Strmap sm -> write_strmap (encode_val ctx) buf sm
-  | `Uintmap im -> write_uintmap (encode_val ctx) buf im
-  | `List l | `Series ([] as l) -> write_list (encode_val ctx) buf l
-  | `Ndarray (shape, values) ->
+  | Strmap sm -> write_strmap (encode_val ctx) buf sm
+  | Uintmap im -> write_uintmap (encode_val ctx) buf im
+  | List l | Series ([] as l) -> write_list (encode_val ctx) buf l
+  | Ndarray (shape, values) ->
     let len = 1 + Array.length values in
     write_list_open buf len;
     write_list write_uint buf shape;
     Array.iter (encode_val ctx buf) values;
     write_list_close buf len
-  | `Enum (schema, s) | `Variant (schema, s, []) ->
+  | Enum (schema, s) | Variant (schema, s, []) ->
     Context.lookup_id ctx schema.path s |> write_uint buf
-  | `Variant (schema, s, l) ->
+  | Variant (schema, s, l) ->
     let len = 1 + List.length l in
     write_list_open buf len;
     Context.lookup_id ctx schema.path s |> write_uint buf;
     List.iter (encode_val ctx buf) l;
     write_list_close buf len
-  | `Record (schema, sm) ->
+  | Record (schema, sm) ->
     let idx = Context.lookup ctx schema.path in
     let index_map k v acc = IntMap.add (Context.idx_id ctx idx k) v acc in
     let im = StringMap.fold index_map sm IntMap.empty in
@@ -221,16 +222,18 @@ let rec encode_val ctx buf = function
       last := id
     in
     IntMap.iter write_field im; write_list_close buf len
-  | `Series (`Record (schema, _) :: _ as rl) ->
+  | Series ((schema, _) :: _ as rl) ->
     let fields = series_fields ctx schema rl in
     let ids = List.map snd fields in
     let len = 1 + (List.length rl * List.length fields) in
     write_list_open buf len;
     write_list (fun buf i -> write_uint buf i) buf ids;
-    let write_record (`Record (_, sm)) =
+    let write_record (_, sm) =
       List.iter (encode_val ctx buf) (series_row fields sm)
     in
     List.iter write_record rl; write_list_close buf len
+  | Raw_gap g -> write_gap buf g
+  | _ -> invalid_arg "vof_bin: encode_val: raw types cannot be converted"
 ;;
 
 let encode_buf ctx ?(buf = Buffer.create 256) v = encode_val ctx buf v; buf
@@ -320,22 +323,22 @@ let decode ?(pos = 0) ?len src =
   let rec item () =
     let c = read_byte () in
     match c with
-    | n when n < 221 -> `Vof_int (read_int_rest c)
-    | 221 -> `Float (Vof_float16.float_of_bits (read_le16 ()))
+    | n when n < 221 -> Raw_int (read_int_rest c)
+    | 221 -> Float (Vof_float16.float_of_bits (read_le16 ()))
     | 222 ->
       let pos = !p in
       if pos + 4 > limit then raise_notrace Exit;
       p := pos + 4;
-      `Float (Int32.float_of_bits (Bytes.get_int32_le raw pos))
+      Float (Int32.float_of_bits (Bytes.get_int32_le raw pos))
     | 223 ->
       let pos = !p in
       if pos + 8 > limit then raise_notrace Exit;
       p := pos + 8;
-      `Float (Int64.float_of_bits (Bytes.get_int64_le raw pos))
-    | n when n < 232 -> `Bin_str (slice (c - 224))
-    | n when n < 244 -> `Vof_list (List.init (c - 232) (fun _ -> item ()))
-    | n when n < 248 -> `Gap (c - 243)
-    | 248 | 249 -> `Bin_str (slice (read_uint ()))
+      Float (Int64.float_of_bits (Bytes.get_int64_le raw pos))
+    | n when n < 232 -> Raw_bstr (slice (c - 224))
+    | n when n < 244 -> Raw_list (List.init (c - 232) (fun _ -> item ()))
+    | n when n < 248 -> Raw_gap (c - 243)
+    | 248 | 249 -> Raw_bstr (slice (read_uint ()))
     | 250 ->
       let[@tail_mod_cons] rec read_open () =
         if peek () = 251
@@ -345,14 +348,14 @@ let decode ?(pos = 0) ?len src =
           v :: read_open ()
         )
       in
-      `Vof_list (read_open ())
+      Raw_list (read_open ())
     | 251 -> raise_notrace Exit
-    | 252 -> `Gap (read_uint ())
-    | 253 -> `Vof_tag (-1, item ())
+    | 252 -> Raw_gap (read_uint ())
+    | 253 -> Raw_tag (-1, item ())
     | 254 ->
       let t = read_uint () in
-      `Vof_tag (t, item ())
-    | _ -> `Null
+      Raw_tag (t, item ())
+    | _ -> Null
   in
   try Some (item (), !p) with Exit -> None
 ;;

@@ -13,9 +13,9 @@ type t = [
   | `List of t list
 ] [@@ocamlformat "disable"]
 
-(** [to_input j] converts JSON [j] to VOF input, ready to use with your [of_vof]
-    functions. *)
-val to_input : t -> Vof.input
+(** [to_raw j] converts JSON [j] to VOF raw variants, ready to use with your
+    [of_vof] functions. *)
+val to_raw : t -> Vof.t
 
 (** [of_vof ctx v] converts VOF [v] to JSON with context [ctx]. *)
 val of_vof : Vof.Context.t -> Vof.t -> t

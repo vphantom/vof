@@ -8,7 +8,7 @@
 
 (** [decode ?pos ?len s] decodes a VOF raw value from the binary-encoded string
     [s]. Returns the decoded input and the number of bytes consumed. *)
-val decode : ?pos:int -> ?len:int -> string -> (Vof.input * int) option
+val decode : ?pos:int -> ?len:int -> string -> (Vof.t * int) option
 
 (** [encode_buf ctx ?buf v] encodes a VOF value [v] with context [ctx] into a
     VOF Binary buffer. If [buf] is provided, it is appended to, otherwise a new

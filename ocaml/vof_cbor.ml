@@ -180,39 +180,39 @@ let decode ?(pos = 0) ?len src =
     let major = b lsr 5 in
     let additional = b land 0x1F in
     match major with
-    | 0 -> `Bin_int (arg additional)
-    | 1 -> `Bin_int (-1 - arg additional)
+    | 0 -> Raw_bint (arg additional)
+    | 1 -> Raw_bint (-1 - arg additional)
     | 2 | 3 ->
       if additional = 31
-      then `Bin_str (indef_string major)
-      else `Bin_str (slice (arg additional))
+      then Raw_bstr (indef_string major)
+      else Raw_bstr (slice (arg additional))
     | 4 ->
       if additional = 31
-      then `Bin_list (read_indef item)
-      else `Bin_list (List.init (arg additional) (fun _ -> item ()))
+      then Raw_blist (read_indef item)
+      else Raw_blist (List.init (arg additional) (fun _ -> item ()))
     | 5 ->
       if additional = 31
-      then `Bin_list (read_indef item)
-      else `Bin_list (List.init (2 * arg additional) (fun _ -> item ()))
+      then Raw_blist (read_indef item)
+      else Raw_blist (List.init (2 * arg additional) (fun _ -> item ()))
     | 6 ->
       let _tag = arg additional in
       item ()
     | 7 -> (
       match additional with
-      | 20 -> `Bool false
-      | 21 -> `Bool true
-      | 22 -> `Null
-      | 25 -> `Float (Vof_float16.float_of_bits (read_be16 ()))
+      | 20 -> Bool false
+      | 21 -> Bool true
+      | 22 -> Null
+      | 25 -> Float (Vof_float16.float_of_bits (read_be16 ()))
       | 26 ->
         if !p + 4 > limit then raise_notrace Exit;
         let n = Bytes.get_int32_be raw !p in
         p := !p + 4;
-        `Float (Int32.float_of_bits n)
+        Float (Int32.float_of_bits n)
       | 27 ->
         if !p + 8 > limit then raise_notrace Exit;
         let n = Bytes.get_int64_be raw !p in
         p := !p + 8;
-        `Float (Int64.float_of_bits n)
+        Float (Int64.float_of_bits n)
       | _ -> raise_notrace Exit
     )
     | _ -> raise_notrace Exit
@@ -221,46 +221,46 @@ let decode ?(pos = 0) ?len src =
 ;;
 
 let rec encode_val ctx buf = function
-  | `Null -> write_null buf
-  | `Bool b -> write_bool buf b
-  | `Int i -> write_int buf i
-  | `Uint i -> write_uint buf i
-  | `Float f -> write_float buf f
-  | `String s -> write_text buf s
-  | `Data d | `Ip d -> write_bytes buf d
-  | `Decimal d -> Decimal.to_n d |> write_int buf
-  | `Ratio (n, d) -> write_array_head buf 2; write_int buf n; write_uint buf d
-  | `Percent d -> Decimal.to_n d |> write_int buf
-  | `Timestamp ts -> write_int buf ts
-  | `Date d ->
+  | Null -> write_null buf
+  | Bool b -> write_bool buf b
+  | Int i | Raw_bint i -> write_int buf i
+  | Uint i -> write_uint buf i
+  | Float f -> write_float buf f
+  | String s | Raw_bstr s -> write_text buf s
+  | Data d | Ip d -> write_bytes buf d
+  | Decimal d -> Decimal.to_n d |> write_int buf
+  | Ratio (n, d) -> write_array_head buf 2; write_int buf n; write_uint buf d
+  | Percent d -> Decimal.to_n d |> write_int buf
+  | Timestamp ts -> write_int buf ts
+  | Date d ->
     write_array_head buf 3;
-    write_int buf Date.(d.year);
-    write_int buf d.month;
-    write_int buf d.day
-  | `Datetime dt ->
+    write_uint buf Date.(d.year);
+    write_uint buf d.month;
+    write_uint buf d.day
+  | Datetime dt ->
     write_array_head buf 5;
-    write_int buf Datetime.(dt.year);
-    write_int buf dt.month;
-    write_int buf dt.day;
-    write_int buf dt.hour;
-    write_int buf dt.minute
-  | `Timespan (a, b, c) ->
+    write_uint buf Datetime.(dt.year);
+    write_uint buf dt.month;
+    write_uint buf dt.day;
+    write_uint buf dt.hour;
+    write_uint buf dt.minute
+  | Timespan (a, b, c) ->
     write_array_head buf 3; write_int buf a; write_int buf b; write_int buf c
-  | `Code s
-  | `Language s
-  | `Country s
-  | `Subdivision s
-  | `Currency s
-  | `Tax_code s
-  | `Unit s -> write_text buf s
-  | `Text tm -> write_strmap write_text buf tm
-  | `Amount (d, opt) -> (
+  | Code s
+  | Language s
+  | Country s
+  | Subdivision s
+  | Currency s
+  | Tax_code s
+  | Unit s -> write_text buf s
+  | Text tm -> write_strmap write_text buf tm
+  | Amount (d, opt) -> (
     let dec = Decimal.to_n d in
     match opt with
     | None -> write_int buf dec
     | Some c -> write_array_head buf 2; write_int buf dec; write_text buf c
   )
-  | `Tax (d, tax, curr) -> (
+  | Tax (d, tax, curr) -> (
     let dec = Decimal.to_n d in
     match curr with
     | Some c ->
@@ -270,32 +270,32 @@ let rec encode_val ctx buf = function
       write_text buf c
     | None -> write_array_head buf 2; write_int buf dec; write_text buf tax
   )
-  | `Quantity (d, opt) -> (
+  | Quantity (d, opt) -> (
     let dec = Decimal.to_n d in
     match opt with
     | None -> write_int buf dec
     | Some u -> write_array_head buf 2; write_int buf dec; write_text buf u
   )
-  | `Subnet (ip, len) ->
+  | Subnet (ip, len) ->
     write_array_head buf 2; write_bytes buf ip; write_int buf len
-  | `Coords (lat, lon) ->
+  | Coords (lat, lon) ->
     write_array_head buf 2; write_float buf lat; write_float buf lon
-  | `Strmap sm -> write_strmap (encode_val ctx) buf sm
-  | `Uintmap im -> write_uintmap (encode_val ctx) buf im
-  | `List l | `Series ([] as l) -> write_array (encode_val ctx) buf l
-  | `Ndarray (shape, values) ->
+  | Strmap sm -> write_strmap (encode_val ctx) buf sm
+  | Uintmap im -> write_uintmap (encode_val ctx) buf im
+  | List l | Series ([] as l) -> write_array (encode_val ctx) buf l
+  | Ndarray (shape, values) ->
     let len = 1 + Array.length values in
     write_array_open buf len;
     write_array write_int buf shape;
     Array.iter (encode_val ctx buf) values;
     write_array_close buf len
-  | `Enum (schema, s) | `Variant (schema, s, []) ->
+  | Enum (schema, s) | Variant (schema, s, []) ->
     Context.lookup_id ctx schema.path s |> write_int buf
-  | `Variant (schema, s, l) ->
+  | Variant (schema, s, l) ->
     write_array_head buf (1 + List.length l);
     Context.lookup_id ctx schema.path s |> write_int buf;
     List.iter (encode_val ctx buf) l
-  | `Record (schema, sm) ->
+  | Record (schema, sm) ->
     let idx = Context.lookup ctx schema.path in
     let index_map k v acc = IntMap.add (Context.idx_id ctx idx k) v acc in
     let im = StringMap.fold index_map sm IntMap.empty in
@@ -303,19 +303,20 @@ let rec encode_val ctx buf = function
     write_map_open buf len;
     IntMap.iter (fun id v -> write_int buf id; encode_val ctx buf v) im;
     write_map_close buf len
-  | `Series (`Record (schema, _) :: _ as rl) ->
+  | Series ((schema, _) :: _ as rl) ->
     let fields = series_fields ctx schema rl in
     let ids = List.map snd fields in
     let nf = List.length fields in
     let len = 1 + List.length rl in
     write_array_open buf len;
     write_array write_int buf ids;
-    let write_record (`Record (_, sm)) =
+    let write_record (_, sm) =
       write_array_open buf nf;
       List.iter (encode_val ctx buf) (series_row fields sm);
       write_array_close buf nf
     in
     List.iter write_record rl; write_array_close buf len
+  | _ -> invalid_arg "vof_cbor: encode_val: raw types cannot be converted"
 ;;
 
 let encode_buf ctx ?(magic = false) ?(buf = Buffer.create 256) v =

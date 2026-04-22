@@ -1,7 +1,10 @@
+module StringSet = Set.Make (String)
 module StringMap = Map.Make (String)
 module IntMap = Map.Make (Int)
 
 let ( let| ) = Option.bind
+
+exception Vof_return
 
 type schema = { path: string; keys: string list; required: string list }
 
@@ -46,7 +49,7 @@ module Decimal = struct
     | 7 -> ((value * 100) lsl 2) lor 3
     | 8 -> ((value * 10) lsl 2) lor 3
     | 9 -> (value lsl 2) lor 3
-    | _ -> failwith "Vof.Decimal.pack: unsupported decimal places"
+    | _ -> invalid_arg "Vof.Decimal.pack: unsupported decimal places"
   ;;
 
   let unpack n =
@@ -61,7 +64,7 @@ module Decimal = struct
 
   let to_n (value, dec) =
     if dec < 0 || dec > 9
-    then failwith "Vof.Decimal.to_n: unsupported decimal places";
+    then invalid_arg "Vof.Decimal.to_n: unsupported decimal places";
     let value, dec = optimize (value, dec) in
     if value < 0 then (value * 10) - dec else (value * 10) + dec
   ;;
@@ -125,7 +128,7 @@ module Decimal = struct
     | 7 -> build 10000000
     | 8 -> build 100000000
     | 9 -> build 1000000000
-    | _ -> failwith "decimals must be 0..9"
+    | _ -> invalid_arg "decimals must be 0..9"
   ;;
 end
 
@@ -285,60 +288,55 @@ module Timestamp = struct
   let unpack p = p + offset
 end
 
-type t = [
-  `Null
-  | `Bool of bool
-  | `Int of int
-  | `Uint of int
-  | `Float of float
-  | `String of string
-  | `Data of bytes
-  | `Enum of schema * string
-  | `Variant of schema * string * t list
-  | `Decimal of Decimal.t
-  | `Ratio of Ratio.t
-  | `Percent of Decimal.t
-  | `Timestamp of int
-  | `Date of Date.t
-  | `Datetime of Datetime.t
-  | `Timespan of int * int * int
-  | `Code of string
-  | `Language of string
-  | `Country of string
-  | `Subdivision of string
-  | `Currency of string
-  | `Tax_code of string
-  | `Unit of string
-  | `Text of string StringMap.t
-  | `Amount of Decimal.t * string option
-  | `Tax of Decimal.t * string * string option
-  | `Quantity of Decimal.t * string option
-  | `Ip of bytes
-  | `Subnet of bytes * int
-  | `Coords of float * float
-  | `Strmap of t StringMap.t
-  | `Uintmap of t IntMap.t
-  | `List of t list
-  | `Ndarray of int list * t array
-  | `Record of schema * t StringMap.t
-  | `Series of [ `Record of schema * t StringMap.t ] list
-] [@@ocamlformat "disable"]
+type t =
+  | Null
+  | Bool of bool
+  | Int of int
+  | Uint of int
+  | Float of float
+  | String of string
+  | Data of bytes
+  | Enum of schema * string
+  | Variant of schema * string * t list
+  | Decimal of Decimal.t
+  | Ratio of Ratio.t
+  | Percent of Decimal.t
+  | Timestamp of int
+  | Date of Date.t
+  | Datetime of Datetime.t
+  | Timespan of int * int * int
+  | Code of string
+  | Language of string
+  | Country of string
+  | Subdivision of string
+  | Currency of string
+  | Tax_code of string
+  | Unit of string
+  | Text of string StringMap.t
+  | Amount of Decimal.t * string option
+  | Tax of Decimal.t * string * string option
+  | Quantity of Decimal.t * string option
+  | Ip of bytes
+  | Subnet of bytes * int
+  | Coords of float * float
+  | Strmap of t StringMap.t
+  | Uintmap of t IntMap.t
+  | List of t list
+  | Ndarray of int list * t array
+  | Record of record
+  | Series of record list
+  | Raw_bint of int
+  | Raw_blist of t list
+  | Raw_bstr of string
+  | Raw_gap of int
+  | Raw_int of int
+  | Raw_list of t list
+  | Raw_tag of int * t
+  | Raw_tint of int
+  | Raw_tlist of t list
+  | Raw_tstr of string
 
-type record = [ `Record of schema * t StringMap.t ]
-
-type input = [
-  t
-  | `Bin_int of int
-  | `Bin_str of string
-  | `Bin_list of input list
-  | `Txt_int of int
-  | `Txt_str of string
-  | `Txt_list of input list
-  | `Gap of int
-  | `Vof_int of int
-  | `Vof_list of input list
-  | `Vof_tag of int * input
-] [@@ocamlformat "disable"]
+and record = schema * t StringMap.t
 
 module Context = struct
   type index = {
@@ -353,6 +351,8 @@ module Context = struct
     mutable registry: index StringMap.t;
     mutable fetchers: (record -> record option) StringMap.t;
   }
+
+  type fetcher = string * (record -> record option)
 
   let add_fetchers ctx fl =
     let add sm (k, v) = StringMap.add k v sm in
@@ -428,48 +428,46 @@ end)
 module Reader = struct
   (* NOTE: Null not useful here *)
 
-  exception Reader_return
-
   let[@tail_mod_cons] rec map_some f = function
     | [] -> []
     | x :: xs -> (
       match f x with
       | Some v -> v :: map_some f xs
-      | None -> raise_notrace Reader_return
+      | None -> raise_notrace Vof_return
     )
   ;;
 
   let[@inline] zigzag i = (i lsr 1) lxor ~-(i land 1)
 
   let int = function
-    | `Vof_int n -> Some (zigzag n)
-    | `Bin_int n | `Txt_int n | `Int n | `Uint n -> Some n
-    | `Txt_str s | `Bin_str s | `String s -> int_of_string_opt s
+    | Raw_int n -> Some (zigzag n)
+    | Raw_bint n | Raw_tint n | Int n | Uint n -> Some n
+    | Raw_tstr s | Raw_bstr s | String s -> int_of_string_opt s
     | _ -> None
   ;;
 
   let uint = function
-    | `Vof_int n | `Bin_int n | `Txt_int n | `Uint n -> Some n
-    | `Txt_str s | `Bin_str s -> int_of_string_opt s
+    | Raw_int n | Raw_bint n | Raw_tint n | Uint n -> Some n
+    | Raw_tstr s | Raw_bstr s -> int_of_string_opt s
     | _ -> None
   ;;
 
   let bool = function
-    | `Bool b -> Some b
-    | `Vof_int i | `Bin_int i | `Txt_int i | `Int i | `Uint i -> Some (i <> 0)
+    | Bool b -> Some b
+    | Raw_int i | Raw_bint i | Raw_tint i | Int i | Uint i -> Some (i <> 0)
     | _ -> None
   ;;
 
   let float = function
-    | `Float f -> Some f
-    | `Bin_int n | `Txt_int n | `Int n | `Uint n -> Some (Float.of_int n)
-    | `Txt_str s | `String s -> float_of_string_opt s
+    | Float f -> Some f
+    | Raw_bint n | Raw_tint n | Int n | Uint n -> Some (Float.of_int n)
+    | Raw_tstr s | String s -> float_of_string_opt s
     | _ -> None
   ;;
 
   let string = function
-    | `Txt_str s | `Bin_str s | `String s -> Some s
-    | `Txt_int n | `Bin_int n | `Int n | `Uint n -> Some (Int.to_string n)
+    | Raw_tstr s | Raw_bstr s | String s -> Some s
+    | Raw_tint n | Raw_bint n | Int n | Uint n -> Some (Int.to_string n)
     | _ -> None
   ;;
 
@@ -482,41 +480,33 @@ module Reader = struct
   let unit_ = string
 
   let data = function
-    | `Txt_str s | `Bin_str s | `String s -> Some (Bytes.of_string s)
-    | `Data d -> Some d
+    | Raw_tstr s | Raw_bstr s | String s -> Some (Bytes.of_string s)
+    | Data d -> Some d
     | _ -> None
   ;;
 
-  let unalt_int i =
-    match i with
-    | `Vof_tag (-1, `Vof_int n) -> `Vof_int (-n)
-    | _ -> i
-  ;;
-
   let decimal = function
-    | `Decimal d -> Some d
-    | `Bin_int n -> Decimal.of_n n
-    | `Vof_int n -> Some (Decimal.unpack n)
-    | `Vof_tag (-1, `Vof_int n) -> Some (Decimal.unpack (-n))
-    | `Bin_str s | `Txt_str s | `String s -> Decimal.of_string s
+    | Decimal d -> Some d
+    | Raw_bint n -> Decimal.of_n n
+    | Raw_int n -> Some (Decimal.unpack n)
+    | Raw_tag (-1, Raw_int n) -> Some (Decimal.unpack (-n))
+    | Raw_bstr s | Raw_tstr s | String s -> Decimal.of_string s
     | _ -> None
   ;;
 
   let ratio = function
-    | `Ratio r -> Some r
-    | `Bin_list [ n; d ]
-    | `Txt_list [ n; d ]
-    | `Vof_list [ n; d ]
-    | `List [ n; d ] -> both_opt (int n, uint d)
-    | `Bin_str s | `Txt_str s | `String s -> Ratio.of_string s
+    | Ratio r -> Some r
+    | Raw_blist [ n; d ] | Raw_tlist [ n; d ] | Raw_list [ n; d ] ->
+      both_opt (int n, uint d)
+    | Raw_bstr s | Raw_tstr s | String s -> Ratio.of_string s
     | _ -> None
   ;;
 
   let percent = function
-    | `Percent d -> Some d
-    | `Bin_int d -> Some (Decimal.unpack d)
-    | `Vof_int n -> Decimal.of_n n
-    | `Txt_str s | `String s ->
+    | Percent d -> Some d
+    | Raw_bint n -> Decimal.of_n n
+    | Raw_int d -> Some (Decimal.unpack d)
+    | Raw_tstr s | String s ->
       let len = String.length s in
       if len > 1 && s.[len - 1] = '%'
       then Decimal.of_string ~shift:2 s
@@ -525,41 +515,37 @@ module Reader = struct
   ;;
 
   let timestamp = function
-    | `Timestamp ts -> Some ts
-    | `Bin_int n -> Some n
-    | `Vof_int n -> Some (zigzag n |> Timestamp.unpack)
-    | `Txt_int n | `Int n -> Some n
-    | `Txt_str s | `String s -> int_of_string_opt s
+    | Timestamp ts -> Some ts
+    | Raw_bint n -> Some n
+    | Raw_int n -> Some (zigzag n |> Timestamp.unpack)
+    | Raw_tint n | Int n -> Some n
+    | Raw_tstr s | String s -> int_of_string_opt s
     | _ -> None
   ;;
 
   let date = function
-    | `Date d -> Some d
-    | `Bin_int n | `Vof_int n | `Int n | `Uint n -> Date.unpack n
-    | `Txt_int n -> Date.of_human n
-    | `Txt_str s ->
+    | Date d -> Some d
+    | Raw_bint n | Raw_int n | Int n | Uint n -> Date.unpack n
+    | Raw_tint n -> Date.of_human n
+    | Raw_tstr s ->
       let| n = int_of_string_opt s in
       Date.of_human n
-    | `Txt_list [ y; m; d ]
-    | `Bin_list [ y; m; d ]
-    | `Vof_list [ y; m; d ]
-    | `List [ y; m; d ] ->
+    | Raw_tlist [ y; m; d ] | Raw_blist [ y; m; d ] | Raw_list [ y; m; d ] ->
       let| y, m, d = three_opt (int y, int m, int d) in
       Some { Date.year = y; month = m; day = d }
     | _ -> None
   ;;
 
   let datetime = function
-    | `Datetime dt -> Some dt
-    | `Bin_int n | `Vof_int n | `Int n | `Uint n -> Datetime.unpack n
-    | `Txt_int n -> Datetime.of_human n
-    | `Txt_str s ->
+    | Datetime dt -> Some dt
+    | Raw_bint n | Raw_int n | Int n | Uint n -> Datetime.unpack n
+    | Raw_tint n -> Datetime.of_human n
+    | Raw_tstr s ->
       let| n = int_of_string_opt s in
       Datetime.of_human n
-    | `Txt_list [ y; m; d; h; min ]
-    | `Bin_list [ y; m; d; h; min ]
-    | `Vof_list [ y; m; d; h; min ]
-    | `List [ y; m; d; h; min ] ->
+    | Raw_tlist [ y; m; d; h; min ]
+    | Raw_blist [ y; m; d; h; min ]
+    | Raw_list [ y; m; d; h; min ] ->
       let| y, m, d = three_opt (int y, int m, int d) in
       let| h, min = both_opt (int h, int min) in
       Some { Datetime.year = y; month = m; day = d; hour = h; minute = min }
@@ -567,52 +553,52 @@ module Reader = struct
   ;;
 
   let timespan = function
-    | `Timespan t -> Some t
-    | `Bin_list [ a; b; c ] | `Txt_list [ a; b; c ] | `Vof_list [ a; b; c ] ->
+    | Timespan (a, b, c) -> Some (a, b, c)
+    | Raw_blist [ a; b; c ] | Raw_tlist [ a; b; c ] | Raw_list [ a; b; c ] ->
       three_opt (int a, int b, int c)
     | _ -> None
   ;;
 
   let decimal_qual = function
-    | `Bin_list [ d; c ] | `Vof_list [ d; c ] | `List [ d; c ] -> (
+    | Raw_blist [ d; c ] | Raw_list [ d; c ] -> (
       match decimal d, string c with
       | Some d, Some c -> Some (d, Some c)
       | _ -> None
     )
-    | `Bin_str s | `Txt_str s | `String s -> (
+    | Raw_bstr s | Raw_tstr s | String s -> (
       match String.split_on_char ' ' s with
       | [ ds ] -> Decimal.of_string ds |> Option.map (fun d -> d, None)
       | [ ds; cs ] -> Decimal.of_string ds |> Option.map (fun d -> d, Some cs)
       | _ -> None
     )
-    | `Bin_list [ d ] | `Vof_list [ d ] | `List [ d ] | d ->
+    | Raw_blist [ d ] | Raw_list [ d ] | d ->
       let| d = decimal d in
       Some (d, None)
   ;;
 
   let amount = function
-    | `Amount a -> Some a
+    | Amount (a, b) -> Some (a, b)
     | d -> decimal_qual d
   ;;
 
   let quantity = function
-    | `Quantity q -> Some q
+    | Quantity (a, b) -> Some (a, b)
     | d -> decimal_qual d
   ;;
 
   let tax = function
-    | `Tax t -> Some t
-    | `Bin_list [ d; t ] | `Vof_list [ d; t ] -> (
+    | Tax (a, b, c) -> Some (a, b, c)
+    | Raw_blist [ d; t ] | Raw_list [ d; t ] -> (
       match decimal d, string t with
       | Some d, Some t -> Some (d, t, None)
       | _ -> None
     )
-    | `Bin_list [ d; t; c ] | `Vof_list [ d; t; c ] -> (
+    | Raw_blist [ d; t; c ] | Raw_list [ d; t; c ] -> (
       match decimal d, string t, string c with
       | Some d, Some t, Some c -> Some (d, t, Some c)
       | _ -> None
     )
-    | `Txt_str s | `String s -> (
+    | Raw_tstr s | String s -> (
       match String.split_on_char ' ' s with
       | [ ds; ts ] -> Decimal.of_string ds |> Option.map (fun d -> d, ts, None)
       | [ ds; ts; cs ] ->
@@ -623,18 +609,16 @@ module Reader = struct
   ;;
 
   let coords = function
-    | `Coords (a, b) -> Some (a, b)
-    | `Bin_list [ a; b ]
-    | `Txt_list [ a; b ]
-    | `Vof_list [ a; b ]
-    | `List [ a; b ] -> both_opt (float a, float b)
+    | Coords (a, b) -> Some (a, b)
+    | Raw_blist [ a; b ] | Raw_tlist [ a; b ] | Raw_list [ a; b ] ->
+      both_opt (float a, float b)
     | _ -> None
   ;;
 
   let ip = function
-    | `Data d | `Ip d -> Some d
-    | `Bin_str s -> Some (Bytes.of_string s)
-    | `Txt_str s | `String s ->
+    | Data d | Ip d -> Some d
+    | Raw_bstr s -> Some (Bytes.of_string s)
+    | Raw_tstr s | String s ->
       Ipaddr.of_string s
       |> Result.to_option
       |> Option.map (fun a -> Ipaddr.to_octets a |> Bytes.of_string)
@@ -642,10 +626,10 @@ module Reader = struct
   ;;
 
   let subnet = function
-    | `Subnet s -> Some s
-    | `Bin_list [ a; n ] | `Txt_list [ a; n ] | `Vof_list [ a; n ] ->
+    | Subnet (a, b) -> Some (a, b)
+    | Raw_blist [ a; n ] | Raw_tlist [ a; n ] | Raw_list [ a; n ] ->
       both_opt (ip a, uint n)
-    | `Txt_str s | `String s -> (
+    | Raw_tstr s | String s -> (
       let module I = Ipaddr in
       let module IP = Ipaddr.Prefix in
       match IP.of_string s with
@@ -656,7 +640,7 @@ module Reader = struct
   ;;
 
   let strmap f = function
-    | `List l | `Bin_list l | `Txt_list l | `Vof_list l ->
+    | Raw_blist l | Raw_tlist l | Raw_list l ->
       let rec each sm = function
         | [] -> Some sm
         | k :: v :: rest -> (
@@ -673,7 +657,7 @@ module Reader = struct
   let text v = strmap string v
 
   let uintmap f = function
-    | `List l | `Bin_list l | `Txt_list l | `Vof_list l ->
+    | Raw_blist l | Raw_tlist l | Raw_list l ->
       let rec each sm = function
         | [] -> Some sm
         | k :: v :: rest -> (
@@ -688,8 +672,8 @@ module Reader = struct
   ;;
 
   let list f = function
-    | `List l | `Bin_list l | `Txt_list l | `Vof_list l -> (
-      try Some (map_some f l) with Reader_return -> None
+    | Raw_blist l | Raw_tlist l | Raw_list l | List l -> (
+      try Some (map_some f l) with Vof_return -> None
     )
     | _ -> None
   ;;
@@ -698,22 +682,21 @@ module Reader = struct
     let map_array sizes a =
       try
         let expected = List.fold_left ( * ) 1 sizes in
-        if expected <> Array.length a then raise_notrace Reader_return;
+        if expected <> Array.length a then raise_notrace Vof_return;
         let next x =
           match f x with
           | Some v -> v
-          | None -> raise_notrace Reader_return
+          | None -> raise_notrace Vof_return
         in
         let out = Array.map next a in
         Some (sizes, out)
-      with Reader_return -> None
+      with Vof_return -> None
     in
     match v with
-    | `Ndarray (sizes, vals) -> map_array sizes vals
-    | `List (sizes :: vals)
-    | `Bin_list (sizes :: vals)
-    | `Txt_list (sizes :: vals)
-    | `Vof_list (sizes :: vals) ->
+    | Ndarray (sizes, vals) -> map_array sizes vals
+    | Raw_blist (sizes :: vals)
+    | Raw_tlist (sizes :: vals)
+    | Raw_list (sizes :: vals) ->
       let| sl = list int sizes in
       Array.of_list vals |> map_array sl
     | _ -> None
@@ -723,26 +706,23 @@ module Reader = struct
     let enum v =
       let idx = Context.lookup ctx schema.path in
       match v with
-      | `Bin_int n | `Txt_int n | `Vof_int n | `Int n | `Uint n ->
+      | Raw_bint n | Raw_tint n | Raw_int n | Int n | Uint n ->
         Context.idx_sym idx n
       | _ -> None
     in
     match v with
-    | `Enum (_, s) -> f s []
-    | `Variant (_, s, l) -> f s (l :> input list)
-    | `Bin_str s | `Txt_str s | `String s -> f s []
-    | `Bin_list (s :: l)
-    | `Txt_list (s :: l)
-    | `Vof_list (s :: l)
-    | `List (s :: l) ->
+    | Enum (_, s) -> f s []
+    | Variant (_, s, l) -> f s l
+    | Raw_bstr s | Raw_tstr s | String s -> f s []
+    | Raw_blist (s :: l) | Raw_tlist (s :: l) | Raw_list (s :: l) ->
       let| name = enum s in
       f name l
     | _ -> enum v
   ;;
 
   let record ctx schema f = function
-    | `Record (_, sm) -> f sm
-    | `Txt_list l | `List l ->
+    | Record (_, sm) -> f sm
+    | Raw_tlist l ->
       let rec pairs sm = function
         | [] -> f sm
         | k :: v :: rest ->
@@ -751,7 +731,7 @@ module Reader = struct
         | _ -> None
       in
       pairs StringMap.empty l
-    | `Bin_list l ->
+    | Raw_blist l ->
       let idx = Context.lookup ctx schema.path in
       let rec pairs sm = function
         | [] -> f sm
@@ -764,11 +744,11 @@ module Reader = struct
         | _ -> None
       in
       pairs StringMap.empty l
-    | `Vof_list l ->
+    | Raw_list l ->
       let idx = Context.lookup ctx schema.path in
       let rec next pos sm = function
         | [] -> f sm
-        | `Gap n :: rest -> next (pos + n) sm rest
+        | Raw_gap n :: rest -> next (pos + n) sm rest
         | v :: rest ->
           let sm =
             match Context.idx_sym idx pos with
@@ -782,34 +762,33 @@ module Reader = struct
   ;;
 
   let series ctx schema f = function
-    | `Bin_list [] | `Txt_list [] | `Vof_list [] | `List [] -> Some []
-    | `Series l -> (
-      try Some (map_some (fun (`Record (_, sm)) -> f sm) l)
-      with Reader_return -> None
+    | Raw_blist [] | Raw_tlist [] | Raw_list [] -> Some []
+    | Series l -> (
+      try Some (map_some (fun (_, sm) -> f sm) l) with Vof_return -> None
     )
-    | `Txt_list (fields :: rows) | `List (fields :: rows) -> (
+    | Raw_tlist (fields :: rows) -> (
       let build_row names = function
-        | `Txt_list vals | `List vals ->
+        | Raw_tlist vals | List vals ->
           stringmap_zip StringMap.empty names vals |> f
         | _ -> None
       in
       let| names = list string fields in
-      try Some (map_some (build_row names) rows) with Reader_return -> None
+      try Some (map_some (build_row names) rows) with Vof_return -> None
     )
-    | `Bin_list (fields :: rows) ->
+    | Raw_blist (fields :: rows) ->
       let| ids = list uint fields in
       let idx = Context.lookup ctx schema.path in
       let names = List.filter_map (Context.idx_sym idx) ids in
       let build_row = function
-        | `Bin_list vals -> stringmap_zip StringMap.empty names vals |> f
+        | Raw_blist vals -> stringmap_zip StringMap.empty names vals |> f
         | _ -> None
       in
       if List.length names <> List.length ids
       then None
       else if names = []
       then Some []
-      else (try Some (map_some build_row rows) with Reader_return -> None)
-    | `Vof_list (fields :: values) ->
+      else (try Some (map_some build_row rows) with Vof_return -> None)
+    | Raw_list (fields :: values) ->
       let idx = Context.lookup ctx schema.path in
       let| ids = list uint fields in
       let names = List.filter_map (Context.idx_sym idx) ids in
@@ -821,7 +800,7 @@ module Reader = struct
           | v :: vs ->
             remaining := vs;
             consume (StringMap.add k v sm) ks
-          | [] -> raise_notrace Reader_return
+          | [] -> raise_notrace Vof_return
         )
       in
       let[@tail_mod_cons] rec read_all () =
@@ -830,21 +809,21 @@ module Reader = struct
         | _ -> (
           match f (consume StringMap.empty names) with
           | Some v -> v :: read_all ()
-          | None -> raise_notrace Reader_return
+          | None -> raise_notrace Vof_return
         )
       in
       if List.length names <> List.length ids
       then None
       else if names = []
       then Some []
-      else (try Some (read_all ()) with Reader_return -> None)
+      else (try Some (read_all ()) with Vof_return -> None)
+    | _ -> None
   ;;
 end
 
-(* Collect all fields from all records, resolve to IDs, return sorted by ID *)
 let series_fields ctx schema records =
   let idx = Context.lookup ctx schema.path in
-  let collect acc (`Record (_, sm)) =
+  let collect acc (_, sm) =
     StringMap.fold (fun k _ a -> StringMap.add k () a) sm acc
   in
   let all = List.fold_left collect StringMap.empty records in
@@ -856,51 +835,46 @@ let series_fields ctx schema records =
   List.sort (fun (_, a) (_, b) -> Int.compare a b) pairs
 ;;
 
-(* Extract one row's values in field order *)
 let series_row fields sm =
   List.map
     (fun (name, _) ->
       match StringMap.find_opt name sm with
       | Some v -> v
-      | None -> `Null
+      | None -> Null
     )
     fields
 ;;
 
-(* PATCH *)
-
 let rec equal (a : t) (b : t) : bool =
   match a, b with
-  | `Float a, `Float b -> Float.equal a b
-  | `Coords (a1, a2), `Coords (b1, b2) -> Float.equal a1 b1 && Float.equal a2 b2
-  | `Enum (_, a), `Enum (_, b) -> String.equal a b
-  | `Variant (_, sa, la), `Variant (_, sb, lb) -> (sa, la) = (sb, lb)
-  | `Text a, `Text b -> StringMap.equal String.equal a b
-  | `Strmap a, `Strmap b -> StringMap.equal equal a b
-  | `Uintmap a, `Uintmap b -> IntMap.equal equal a b
-  | `Record (_, a), `Record (_, b) -> StringMap.equal equal a b
-  | `List a, `List b -> List.equal equal a b
-  | `Ndarray (s1, v1), `Ndarray (s2, v2) ->
+  | Float a, Float b -> Float.equal a b
+  | Coords (a1, a2), Coords (b1, b2) -> Float.equal a1 b1 && Float.equal a2 b2
+  | Enum (_, a), Enum (_, b) -> String.equal a b
+  | Variant (_, sa, la), Variant (_, sb, lb) -> (sa, la) = (sb, lb)
+  | Text a, Text b -> StringMap.equal String.equal a b
+  | Strmap a, Strmap b -> StringMap.equal equal a b
+  | Uintmap a, Uintmap b -> IntMap.equal equal a b
+  | Record (_, a), Record (_, b) -> StringMap.equal equal a b
+  | List a, List b -> List.equal equal a b
+  | Ndarray (s1, v1), Ndarray (s2, v2) ->
     let n = Array.length v1 in
     let rec loop i = i >= n || (equal v1.(i) v2.(i) && loop (i + 1)) in
     List.equal Int.equal s1 s2 && n = Array.length v2 && loop 0
-  | `Series a, `Series b ->
-    List.equal
-      (fun (`Record (_, a)) (`Record (_, b)) -> StringMap.equal equal a b)
-      a b
+  | Series a, Series b ->
+    List.equal (fun (_, a) (_, b) -> StringMap.equal equal a b) a b
   | a, b -> a = b
 ;;
 
-let as_records l =
-  List.filter_map
-    (function
-      | `Record _ as r -> Some r
-      | _ -> None
-      )
-    l
+let all_records l =
+  let[@tail_mod_cons] rec loop = function
+    | [] -> []
+    | Record r :: rest -> r :: loop rest
+    | _ -> raise_notrace Vof_return
+  in
+  try Some (loop l) with Vof_return -> None
 ;;
 
-let rec diff (`Record (sa, a)) (`Record (_, b)) =
+let rec diff_rec (sa, a) (_, b) =
   let is_key k = List.mem k sa.keys in
   let collect_keys acc k =
     match StringMap.find_opt k b with
@@ -917,40 +891,37 @@ let rec diff (`Record (sa, a)) (`Record (_, b)) =
     )
   in
   let unset_removed k _ acc =
-    if is_key k || StringMap.mem k b then acc else StringMap.add k `Null acc
+    if is_key k || StringMap.mem k b then acc else StringMap.add k Null acc
   in
   let result =
     List.fold_left collect_keys StringMap.empty sa.keys
     |> StringMap.fold merge_field b
     |> StringMap.fold unset_removed a
   in
-  `Record (sa, result)
+  sa, result
 
 and diff_field k va vb acc =
   match va, vb with
-  | (`Record _ as ra), (`Record _ as rb) ->
-    let (`Record (s, dm) as d) = diff ra rb in
+  | Record ra, Record rb ->
+    let ((s, dm) as d) = diff_rec ra rb in
     if StringMap.for_all (fun f _ -> List.mem f s.keys) dm
     then acc
-    else StringMap.add k (d :> t) acc
-  | `List ol, `List nl when ol <> [] || nl <> [] ->
-    let ol' = as_records ol
-    and nl' = as_records nl in
-    if List.length ol' = List.length ol && List.length nl' = List.length nl
-    then (
+    else StringMap.add k (Record d) acc
+  | List ol, List nl when ol <> [] || nl <> [] -> (
+    match all_records ol, all_records nl with
+    | Some ol', Some nl' -> (
       match diff_record_list ol' nl' with
       | [] -> acc
-      | dl -> StringMap.add k (`List dl) acc
+      | dl -> StringMap.add k (List (List.map (fun r -> Record r) dl)) acc
     )
-    else if compare va vb = 0
-    then acc
-    else StringMap.add k vb acc
+    | _ -> if compare va vb = 0 then acc else StringMap.add k vb acc
+  )
   | _ -> if compare va vb = 0 then acc else StringMap.add k vb acc
 
-and diff_record_list (old_list : record list) (new_list : record list) =
+and diff_record_list old_list new_list =
   let schema =
     match old_list @ new_list with
-    | `Record (s, _) :: _ -> s
+    | (s, _) :: _ -> s
     | _ -> assert false
   in
   let keys = schema.keys in
@@ -967,27 +938,33 @@ and diff_record_list (old_list : record list) (new_list : record list) =
   in
   let old_map =
     List.fold_left
-      (fun acc (`Record (_, sm) as r) -> KeyMap.add (key_of sm) r acc)
+      (fun acc ((_, sm) as r) -> KeyMap.add (key_of sm) r acc)
       KeyMap.empty old_list
   in
-  let process_new_item (results, consumed) (`Record (_, sm) as nr) =
+  let process_new_item (results, consumed) ((_, sm) as nr) =
     let kt = key_of sm in
     match KeyMap.find_opt kt old_map with
-    | None -> (nr :> t) :: results, consumed
-    | Some (`Record _ as or_) ->
+    | None -> nr :: results, consumed
+    | Some or_ ->
       let consumed = KeyMap.add kt () consumed in
-      let (`Record (_, dm) as d) = diff or_ nr in
+      let ((_, dm) as d) = diff_rec or_ nr in
       if StringMap.for_all (fun f _ -> List.mem f keys) dm
       then results, consumed
-      else (d :> t) :: results, consumed
+      else d :: results, consumed
   in
   let rev_results, consumed =
     List.fold_left process_new_item ([], KeyMap.empty) new_list
   in
-  let collect_deleted acc (`Record (s, sm)) =
+  let collect_deleted acc (s, sm) =
     if KeyMap.mem (key_of sm) consumed
     then acc
-    else (`Record (s, restrict_to_keys sm) :> t) :: acc
+    else (s, restrict_to_keys sm) :: acc
   in
-  old_list |> List.fold_left collect_deleted [] |> List.rev_append rev_results
+  List.fold_left collect_deleted rev_results old_list
+;;
+
+let diff a b =
+  match a, b with
+  | Record ra, Record rb -> Some (Record (diff_rec ra rb))
+  | _ -> None
 ;;
