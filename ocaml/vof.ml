@@ -192,20 +192,30 @@ module Reader = struct
 
   let uint = function
     | Raw_int n | Raw_bint n | Raw_tint n | Uint n -> Some n
+    | Int i -> if i >= 0 then Some i else None
     | Raw_tstr s | Raw_bstr s -> int_of_string_opt s
     | _ -> None
   ;;
 
   let bool = function
+    | Null -> Some false
     | Bool b -> Some b
     | Raw_int i | Raw_bint i | Raw_tint i | Int i | Uint i -> Some (i <> 0)
+    | Float f -> Some (f <> 0.0)
+    | Decimal (d, _) | Ratio (d, _) | Percent (d, _) -> Some (d <> 0)
+    | Amount ((d, _), _) | Quantity ((d, _), _) | Tax ((d, _), _, _) ->
+      Some (d <> 0)
+    | Text sm -> Some (StringMap.cardinal sm <> 0)
+    | Strmap sm -> Some (StringMap.cardinal sm <> 0)
+    | Uintmap um -> Some (IntMap.cardinal um <> 0)
+    | List l -> Some (List.length l <> 0)
     | _ -> None
   ;;
 
   let float = function
     | Float f -> Some f
     | Raw_bint n | Raw_tint n | Int n | Uint n -> Some (Float.of_int n)
-    | Raw_tstr s | String s -> float_of_string_opt s
+    | Raw_bstr s | Raw_tstr s | String s -> float_of_string_opt s
     | _ -> None
   ;;
 
@@ -230,7 +240,7 @@ module Reader = struct
   ;;
 
   let decimal = function
-    | Decimal d -> Some d
+    | Decimal d | Percent d -> Some d
     | Raw_bint n -> Decimal.of_n n
     | Raw_int n -> Some (Decimal.unpack n)
     | Raw_tag (-1, Raw_int n) -> Some (Decimal.unpack (-n))
@@ -247,10 +257,11 @@ module Reader = struct
   ;;
 
   let percent = function
-    | Percent d -> Some d
+    | Percent d | Decimal d -> Some d
     | Raw_bint n -> Decimal.of_n n
     | Raw_int d -> Some (Decimal.unpack d)
-    | Raw_tstr s | String s ->
+    | Raw_tint i -> Some (Decimal.optimize (i, 2))
+    | Raw_bstr s | Raw_tstr s | String s ->
       let len = String.length s in
       if len > 1 && s.[len - 1] = '%'
       then Decimal.of_string ~shift:2 s
@@ -259,11 +270,10 @@ module Reader = struct
   ;;
 
   let timestamp = function
-    | Timestamp ts -> Some ts
+    | Timestamp ts | Uint ts | Int ts | Raw_tint ts -> Some ts
     | Raw_bint n -> Some n
     | Raw_int n -> Some (zigzag n |> Timestamp.unpack)
-    | Raw_tint n | Int n -> Some n
-    | Raw_tstr s | String s -> int_of_string_opt s
+    | Raw_tstr s | Raw_bstr s | String s -> int_of_string_opt s
     | _ -> None
   ;;
 
@@ -274,12 +284,16 @@ module Reader = struct
     in
     match d with
     | Date d -> Some d
-    | Raw_bint n | Raw_int n | Int n | Uint n -> Date.unpack n |> conv
+    | Datetime dt -> Some { year = dt.year; month = dt.month; day = dt.day }
+    | Raw_bint n | Raw_int n -> Date.unpack n |> conv
     | Raw_tint n -> Date.of_human n |> conv
     | Raw_tstr s ->
       let| n = int_of_string_opt s in
       Date.of_human n |> conv
-    | Raw_tlist [ y; m; d ] | Raw_blist [ y; m; d ] | Raw_list [ y; m; d ] ->
+    | Raw_tlist [ y; m; d ]
+    | Raw_blist [ y; m; d ]
+    | Raw_list [ y; m; d ]
+    | List [ y; m; d ] ->
       let| year, month, day = three_opt (int y, int m, int d) in
       Some { year; month; day }
     | _ -> None
@@ -287,12 +301,14 @@ module Reader = struct
 
   let datetime dt =
     let conv = function
-      | Some (y, m, d, hh, mm) ->
-        Some { year = y; month = m; day = d; hour = hh; minute = mm }
+      | Some (year, month, day, hour, minute) ->
+        Some { year; month; day; hour; minute }
       | None -> None
     in
     match dt with
     | Datetime dt -> Some dt
+    | Date d ->
+      Some { year = d.year; month = d.month; day = d.day; hour = 0; minute = 0 }
     | Raw_bint n | Raw_int n | Int n | Uint n -> Datetime.unpack n |> conv
     | Raw_tint n -> Datetime.of_human n |> conv
     | Raw_tstr s ->
@@ -300,7 +316,8 @@ module Reader = struct
       Datetime.of_human n |> conv
     | Raw_tlist [ y; m; d; hh; mm ]
     | Raw_blist [ y; m; d; hh; mm ]
-    | Raw_list [ y; m; d; hh; mm ] ->
+    | Raw_list [ y; m; d; hh; mm ]
+    | List [ y; m; d; hh; mm ] ->
       let| year, month, day = three_opt (int y, int m, int d) in
       let| hour, minute = both_opt (int hh, int mm) in
       Some { year; month; day; hour; minute }
@@ -309,24 +326,29 @@ module Reader = struct
 
   let timespan = function
     | Timespan (a, b, c) -> Some (a, b, c)
-    | Raw_blist [ a; b; c ] | Raw_tlist [ a; b; c ] | Raw_list [ a; b; c ] ->
-      three_opt (int a, int b, int c)
+    | Raw_blist [ a; b; c ]
+    | Raw_tlist [ a; b; c ]
+    | Raw_list [ a; b; c ]
+    | List [ a; b; c ] -> three_opt (int a, int b, int c)
     | _ -> None
   ;;
 
   let decimal_qual = function
-    | Raw_blist [ d; c ] | Raw_list [ d; c ] -> (
-      match decimal d, string c with
-      | Some d, Some c -> Some (d, Some c)
-      | _ -> None
-    )
     | Raw_bstr s | Raw_tstr s | String s -> (
       match String.split_on_char ' ' s with
       | [ ds ] -> Decimal.of_string ds |> Option.map (fun d -> d, None)
       | [ ds; cs ] -> Decimal.of_string ds |> Option.map (fun d -> d, Some cs)
       | _ -> None
     )
-    | Raw_blist [ d ] | Raw_list [ d ] | d ->
+    | Raw_blist [ d; c ]
+    | Raw_list [ d; c ]
+    | Raw_tlist [ d; c ]
+    | List [ d; c ] -> (
+      match decimal d, string c with
+      | Some d, Some c -> Some (d, Some c)
+      | _ -> None
+    )
+    | Raw_blist [ d ] | Raw_list [ d ] | List [ d ] | d ->
       let| d = decimal d in
       Some (d, None)
   ;;
@@ -343,7 +365,10 @@ module Reader = struct
 
   let tax = function
     | Tax (a, b, c) -> Some (a, b, c)
-    | Raw_blist [ d; t ] | Raw_list [ d; t ] -> (
+    | Raw_blist [ d; t ]
+    | Raw_list [ d; t ]
+    | Raw_tlist [ d; t ]
+    | List [ d; t ] -> (
       match decimal d, string t with
       | Some d, Some t -> Some (d, t, None)
       | _ -> None
@@ -353,7 +378,7 @@ module Reader = struct
       | Some d, Some t, Some c -> Some (d, t, Some c)
       | _ -> None
     )
-    | Raw_tstr s | String s -> (
+    | Raw_tstr s | Raw_bstr s | String s -> (
       match String.split_on_char ' ' s with
       | [ ds; ts ] -> Decimal.of_string ds |> Option.map (fun d -> d, ts, None)
       | [ ds; ts; cs ] ->
@@ -365,8 +390,10 @@ module Reader = struct
 
   let coords = function
     | Coords (a, b) -> Some (a, b)
-    | Raw_blist [ a; b ] | Raw_tlist [ a; b ] | Raw_list [ a; b ] ->
-      both_opt (float a, float b)
+    | Raw_blist [ a; b ]
+    | Raw_tlist [ a; b ]
+    | Raw_list [ a; b ]
+    | List [ a; b ] -> both_opt (float a, float b)
     | _ -> None
   ;;
 
@@ -382,8 +409,10 @@ module Reader = struct
 
   let subnet = function
     | Subnet (a, b) -> Some (a, b)
-    | Raw_blist [ a; n ] | Raw_tlist [ a; n ] | Raw_list [ a; n ] ->
-      both_opt (ip a, uint n)
+    | Raw_blist [ a; n ]
+    | Raw_tlist [ a; n ]
+    | Raw_list [ a; n ]
+    | List [ a; n ] -> both_opt (ip a, uint n)
     | Raw_tstr s | String s -> (
       let module I = Ipaddr in
       let module IP = Ipaddr.Prefix in
@@ -395,7 +424,7 @@ module Reader = struct
   ;;
 
   let strmap f = function
-    | Raw_blist l | Raw_tlist l | Raw_list l ->
+    | Raw_blist l | Raw_tlist l | Raw_list l | List l ->
       let rec each sm = function
         | [] -> Some sm
         | k :: v :: rest -> (
@@ -412,7 +441,7 @@ module Reader = struct
   let text v = strmap string v
 
   let uintmap f = function
-    | Raw_blist l | Raw_tlist l | Raw_list l ->
+    | Raw_blist l | Raw_tlist l | Raw_list l | List l ->
       let rec each sm = function
         | [] -> Some sm
         | k :: v :: rest -> (
@@ -451,7 +480,8 @@ module Reader = struct
     | Ndarray (sizes, vals) -> map_array sizes vals
     | Raw_blist (sizes :: vals)
     | Raw_tlist (sizes :: vals)
-    | Raw_list (sizes :: vals) ->
+    | Raw_list (sizes :: vals)
+    | List (sizes :: vals) ->
       let| sl = list int sizes in
       Array.of_list vals |> map_array sl
     | _ -> None
@@ -469,7 +499,8 @@ module Reader = struct
     | Enum (_, s) -> f s []
     | Variant (_, s, l) -> f s l
     | Raw_bstr s | Raw_tstr s | String s -> f s []
-    | Raw_blist (s :: l) | Raw_tlist (s :: l) | Raw_list (s :: l) ->
+    | Raw_blist (s :: l) | Raw_tlist (s :: l) | Raw_list (s :: l) | List (s :: l)
+      ->
       let| name = enum s in
       f name l
     | _ -> enum v
