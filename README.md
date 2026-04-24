@@ -48,7 +48,6 @@ Release Candidate 14 - 2026-04-20
 
 - [ ] Test round-trips to try to catch fatal design issues
 - [ ] Create data files to help test all implementations
-- [ ] Perl JSON reference implementation
 
 ## SPECIFICATIONS
 
@@ -58,7 +57,8 @@ Release Candidate 14 - 2026-04-20
 
 ## IMPLEMENTATIONS
 
-* [OCaml](ocaml/README.md) (JSON/CBOR/Binary, API)
+* [OCaml](ocaml/README.md) (JSON/CBOR/Binary, API server utils)
+* [Perl 5](perl5/TODO.md) (JSON client only)
 
 ## ACKNOWLEDGEMENTS
 
