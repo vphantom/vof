@@ -4,8 +4,7 @@ Goals:
 
 * Client-side core library, helpers for the type system
 * JSON codec
-* Structured to facilitate the addition of CBOR and Binary codecs later (i.e. stub `VOF::Context` passed around but not actually used yet)
-* Series uses string field order, since for now there's no context to get integer IDs from.
+* Structured to facilitate the addition of CBOR and Binary codecs later (`VOF::Context` loads shared symbol table files for schema-driven reading)
 * No server-side helpers (PATCH generation, `select~` processing)
 * Testing, since this will be used in production
 
@@ -14,6 +13,7 @@ Relevant files from the OCaml implementation: `vof.ml`, `vof_lib.ml`, `vof_json.
 ## Status
 
 * [x] Skeleton PM files with POD and stubs: `VOF.pm`, `VOF/JSON.pm`
+* [x] Implement `VOF::Context` (load symbol tables, schema lookup)
 * [ ] Implement `VOF.pm` helpers (decimal, ratio, date, datetime)
 * [ ] Implement `VOF.pm` constructors
 * [ ] Implement `VOF.pm` readers
@@ -29,4 +29,5 @@ Relevant files from the OCaml implementation: `vof.ml`, `vof_lib.ml`, `vof_json.
 * Readers live in `VOF.pm` (format-agnostic), not in `VOF/JSON.pm`.  `JSON.pm::decode()` only wraps JSON into `VOF_RAW_T*` values; the shared readers then interpret those.  This avoids duplicating readers when CBOR/Binary codecs arrive.
 * Reader prefix: `as_*` (e.g. `as_decimal`).  Constructor prefix: `vof_*` (e.g. `vof_decimal`).
 * Readers return `undef` on type mismatch.  Constructors `croak` on invalid input.
+* Context-driven schemas — `VOF::Context` loads symbol table files and builds schemas via `$ctx->schema($relative_path)`, automatically prepending the root namespace.  `VOF::Schema` is an internal data carrier, not part of the public API.  Optional `keys`/`required` hints in `schema()` allow validation against loaded data (server safety net) or standalone use (tests).
 * Dependencies: `JSON` (core) and `MIME::Base64` (core).  Evaluate IP formatting needs when implementing network types.

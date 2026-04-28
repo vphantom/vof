@@ -20,11 +20,9 @@ VOF - Vanilla Object Framework
 	my $i = as_int($raw_value);        # integer or undef
 
 	# Schema-driven reading
-	my $schema = VOF::Schema->new("com.example.order",
-		keys     => ["id"],
-		required => ["id", "customer"],
-	);
 	my $ctx = VOF::Context->new("com.example");
+	$ctx->load("path/to/symbols.vof");
+	my $schema = $ctx->schema("order");
 	my $order = as_record($ctx, $schema, $raw, sub {
 		my ($fields) = @_;
 		# $fields is a hashref of field_name => raw VOF value
@@ -58,10 +56,8 @@ CBOR, etc.) into native Perl data, returning C<undef> on type mismatch.
 =item * B<Helper functions> — utilities for decimal, ratio, date and datetime
 conversions.
 
-=item * B<VOF::Schema> — lightweight record schema descriptor.
-
-=item * B<VOF::Context> — stub for future symbol table support (CBOR/Binary
-codecs).
+=item * B<VOF::Context> — loads VOF symbol table files and provides schemas for
+record types, variants and enums.
 
 =back
 
@@ -244,46 +240,8 @@ package VOF::Value {
 }
 
 # ###########################################################################
-# VOF::Schema — record schema descriptor
+# VOF::Schema — internal record schema descriptor (returned by Context)
 # ###########################################################################
-
-=head1 VOF::Schema
-
-Lightweight descriptor for record types, used by readers and encoders to
-interpret structured data.
-
-=head2 C<< VOF::Schema->new($path, %opts) >>
-
-	my $schema = VOF::Schema->new("com.example.order",
-		keys     => ["id"],
-		required => ["id", "customer"],
-	);
-
-Arguments:
-
-=over 4
-
-=item C<$path>
-
-Dot-delimited namespace (e.g. C<"com.example.order.line">).
-
-=item C<keys>
-
-Arrayref of primary key field names.  Default: C<[]>.
-
-=item C<required>
-
-Arrayref of required field names (including keys if applicable).
-Default: C<[]>.
-
-=back
-
-=head2 C<< $schema->is_reference(\%fields) >>
-
-Returns true if C<%fields> contains only key and required fields, indicating a
-reference rather than a full record.
-
-=cut
 
 package VOF::Schema {
 	sub new {
@@ -303,27 +261,164 @@ package VOF::Schema {
 }
 
 # ###########################################################################
-# VOF::Context — symbol table stub
+# VOF::Context — symbol table and schema management
 # ###########################################################################
 
 =head1 VOF::Context
 
-Stub for the symbol table context needed by CBOR and VOF Binary codecs.
-Currently a no-op placeholder; JSON encoding uses string field names directly
-and does not require a populated context.
+Manages VOF symbol table namespaces and provides schemas for record types,
+variants and enums.
 
 =head2 C<< VOF::Context->new($root) >>
 
+Creates a new context with the given root namespace.
+
 	my $ctx = VOF::Context->new("com.example");
 
-Creates a new context with the given root namespace.
+=head2 C<< $ctx->load($file_path) >>
+
+Parses a VOF symbol table file and registers all namespaces and their symbols.
+Returns C<$ctx> for chaining.  Croaks on I/O errors or malformed input.
+
+	$ctx->load("path/to/symbols.vof");
+
+The file format is described in the VOF specification.  Lines starting with
+C<#> are comments; lines starting with a TAB are symbol definitions in the
+current namespace; other lines are namespace declarations.  Symbol lines may
+carry whitespace-delimited qualifiers (C<key>, C<req>); unknown qualifiers are
+silently ignored.
+
+=head2 C<< $ctx->schema($path, %opts) >>
+
+Returns a schema object for the given relative namespace path (without the root
+prefix), used by reader functions such as C<as_record>, C<as_variant> and
+C<as_series>.  The root namespace is automatically prepended.  Four modes:
+
+=over 4
+
+=item B<Path loaded, no hints> — returns schema from file.  Typical client use.
+
+=item B<Path loaded, hints provided> — validates that C<keys> and C<required>
+match the file, croaks on mismatch.  Safety net for servers.
+
+=item B<Path not loaded, hints provided> — returns schema from hints alone.
+Useful for tests.
+
+=item B<Path not loaded, no hints> — croaks.
+
+=back
+
+	# From loaded symbol table
+	my $schema = $ctx->schema("order");         # looks up "com.example.order"
+
+	# With validation hints (server-side safety net)
+	my $schema = $ctx->schema("order",
+		keys     => ["id"],
+		required => ["mtime"],
+	);
+
+	# Standalone for tests
+	my $ctx = VOF::Context->new("test");
+	my $schema = $ctx->schema("thing",          # looks up "test.thing"
+		keys     => ["id"],
+		required => [],
+	);
+
+Options:
+
+=over 4
+
+=item C<keys>
+
+Arrayref of primary key field names.
+
+=item C<required>
+
+Arrayref of required (non-key) field names — fields that appear in references
+alongside keys.
+
+=back
+
+The full namespace path (C<"$root.$relative_path">) is stored in the returned
+schema object.
 
 =cut
 
 package VOF::Context {
+	use Carp qw(croak);
+
 	sub new {
 		my ($class, $root) = @_;
-		return bless { root => $root }, $class;
+		return bless { root => $root, namespaces => {} }, $class;
+	}
+
+	sub load {
+		my ($self, $file_path) = @_;
+		open my $fh, '<', $file_path
+			or croak "VOF::Context: cannot open '$file_path': $!";
+		my $root_prefix = "$self->{root}.";
+		my $current_ns;
+		while (my $line = <$fh>) {
+			$line =~ s/[\r\n]+\z//;
+			next if $line eq '' || $line =~ /^#/;
+			if ($line =~ /^\t(.+)/) {
+				next unless defined $current_ns;
+				my ($symbol, @quals) = split /\s+/, $1;
+				my %flags = map { $_ => 1 } @quals;
+				my $ns = ($self->{namespaces}{$current_ns} ||= {
+					symbols  => [],
+					keys     => [],
+					required => [],
+				});
+				push @{$ns->{symbols}}, $symbol;
+				if ($flags{key}) {
+					push @{$ns->{keys}}, $symbol;
+				}
+				elsif ($flags{req}) {
+					push @{$ns->{required}}, $symbol;
+				}
+			}
+			else {
+				if (index($line, $root_prefix) == 0) {
+					$current_ns = $line;
+				}
+				else {
+					Carp::carp(
+						"VOF::Context: skipping namespace '$line'"
+						. " outside root '$self->{root}' in '$file_path'"
+					);
+					$current_ns = undef;
+				}
+			}
+		}
+		close $fh;
+		return $self;
+	}
+
+	sub schema {
+		my ($self, $rel_path, %opts) = @_;
+		my $path       = "$self->{root}.$rel_path";
+		my $ns         = $self->{namespaces}{$path};
+		my $hint_keys  = $opts{keys};
+		my $hint_req   = $opts{required};
+		my $have_hints = defined $hint_keys || defined $hint_req;
+
+		if ($ns && $have_hints) {
+			my $fk = join("\0", sort @{$ns->{keys}});
+			my $hk = join("\0", sort @{$hint_keys || []});
+			croak "VOF::Context: keys mismatch for '$path'" if $fk ne $hk;
+			my $fr = join("\0", sort @{$ns->{required}});
+			my $hr = join("\0", sort @{$hint_req || []});
+			croak "VOF::Context: required mismatch for '$path'" if $fr ne $hr;
+		}
+		elsif (!$ns && !$have_hints) {
+			croak "VOF::Context: unknown namespace '$path'";
+		}
+
+		return VOF::Schema->new($path,
+			keys     => ($ns ? $ns->{keys}     : ($hint_keys || [])),
+			required => ($ns ? $ns->{required} : ($hint_req  || [])),
+		);
 	}
 }
 
