@@ -447,15 +447,56 @@ Decimal places must be in the range 0..9.
 
 =item C<decimal_of_string( $str )>
 
+=item C<decimal_of_string( $str, $shift )>
+
 Parses a decimal string such as C<"12.50"> and returns C<[$significand,
 $places]> or C<undef> on failure.  Leading zeros and trailing decimal zeros are
-normalized.
+normalized.  Non-numeric characters other than C<'-'> and C<'.'> are silently
+ignored, so strings like C<"1,234.56"> and C<"50%"> are accepted.
+
+The optional C<$shift> (default 0) adds extra decimal places to the result,
+effectively dividing the parsed value by C<10 ** $shift>.  This is used
+internally by the percent reader (C<$shift = 2> divides by 100) and may be
+useful for any fixed-point representation that needs rescaling on parse.
 
 =cut
 
 sub decimal_of_string {
-	my ($str) = @_;
-	...
+	my ($str, $shift) = @_;
+	return undef unless defined $str;
+	$shift //= 0;
+
+	my $buf        = '';
+	my $int_chars  = -1;
+	my $last_nz    = 0;
+
+	for my $c (split //, $str) {
+		if ($c eq '-' || $c eq '0') {
+			$buf .= $c;
+		}
+		elsif ($c ge '1' && $c le '9') {
+			$buf .= $c;
+			$last_nz = length $buf;
+		}
+		elsif ($c eq '.') {
+			$int_chars = length $buf;
+			$last_nz   = length $buf;
+		}
+		# else: skip (lenient)
+	}
+
+	if ($int_chars >= 0) {
+		$buf = substr($buf, 0, $last_nz);
+	}
+	else {
+		$int_chars = length $buf;
+	}
+
+	return undef unless length $buf && $buf =~ /^-?\d+\z/;
+	my $i      = 0 + $buf;
+	my $places = length($buf) - $int_chars + $shift;
+	my ($sig, $dec) = decimal_optimize($i, $places);
+	return [$sig, $dec];
 }
 
 =item C<decimal_to_string( $significand, $places )>
@@ -467,7 +508,19 @@ except a single C<"0"> before the decimal point).
 
 sub decimal_to_string {
 	my ($sig, $places) = @_;
-	...
+	croak "decimal_to_string: places must be 0..9" if $places < 0 || $places > 9;
+	return "$sig" if $places == 0;
+
+	my $scale = 10 ** $places;
+	my $i     = int($sig / $scale);
+	my $f     = abs($sig % $scale);
+
+	return "$i" if $f == 0;
+
+	my $prefix = ($sig < 0 && $i == 0) ? '-0' : "$i";
+	my $s = sprintf('%s.%0*d', $prefix, $places, $f);
+	$s =~ s/0+\z//;
+	return $s;
 }
 
 =item C<decimal_optimize( $significand, $places )>
@@ -479,7 +532,11 @@ C<(1250, 3)> becomes C<(125, 2)>.
 
 sub decimal_optimize {
 	my ($sig, $places) = @_;
-	...
+	while ($places > 0 && $sig % 10 == 0) {
+		$sig = int($sig / 10);
+		$places--;
+	}
+	return ($sig, $places);
 }
 
 =back
@@ -499,7 +556,10 @@ positive.
 
 sub ratio_of_string {
 	my ($str) = @_;
-	...
+	return undef unless defined $str && $str =~ m{^(-?\d+)/(\d+)\z};
+	my ($n, $d) = (0 + $1, 0 + $2);
+	return undef unless $d > 0;
+	return [$n, $d];
 }
 
 =item C<ratio_to_string( $numerator, $denominator )>
@@ -510,7 +570,7 @@ Returns the string C<"$n/$d">.
 
 sub ratio_to_string {
 	my ($n, $d) = @_;
-	...
+	return "$n/$d";
 }
 
 =back
@@ -530,7 +590,14 @@ C<undef> if the components are out of range.
 
 sub date_of_human {
 	my ($n) = @_;
-	...
+	return undef unless defined $n;
+	my $y = int($n / 10000);
+	my $m = int($n % 10000 / 100);
+	my $d = $n % 100;
+	return undef unless $y >= 1000 && $y <= 9999
+		&& $m >= 1 && $m <= 12
+		&& $d >= 1 && $d <= 31;
+	return [$y, $m, $d];
 }
 
 =item C<date_to_human( $y, $m, $d )>
@@ -541,7 +608,7 @@ Returns the C<YYYYMMDD> integer C<$y*10000 + $m*100 + $d>.
 
 sub date_to_human {
 	my ($y, $m, $d) = @_;
-	...
+	return $y * 10000 + $m * 100 + $d;
 }
 
 =back
@@ -561,7 +628,18 @@ C<[$y, $m, $d, $hh, $mm]> or C<undef> if the components are out of range.
 
 sub datetime_of_human {
 	my ($n) = @_;
-	...
+	return undef unless defined $n;
+	my $y  = int($n / 100_000_000);
+	my $m  = int($n / 1_000_000) % 100;
+	my $d  = int($n / 10_000) % 100;
+	my $hh = int($n / 100) % 100;
+	my $mm = $n % 100;
+	return undef unless $y >= 1000 && $y <= 9999
+		&& $m >= 1  && $m <= 12
+		&& $d >= 1  && $d <= 31
+		&& $hh <= 23
+		&& $mm <= 59;
+	return [$y, $m, $d, $hh, $mm];
 }
 
 =item C<datetime_to_human( $y, $m, $d, $hh, $mm )>
@@ -572,7 +650,7 @@ Returns the C<YYYYMMDDHHMM> integer.
 
 sub datetime_to_human {
 	my ($y, $m, $d, $hh, $mm) = @_;
-	...
+	return $y * 100_000_000 + $m * 1_000_000 + $d * 10_000 + $hh * 100 + $mm;
 }
 
 =back
