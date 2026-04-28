@@ -15,7 +15,7 @@ Relevant files from the OCaml implementation: `vof.ml`, `vof_lib.ml`, `vof_json.
 * [x] Skeleton PM files with POD and stubs: `VOF.pm`, `VOF/JSON.pm`
 * [x] Implement `VOF::Context` (load symbol tables, schema lookup)
 * [x] Implement `VOF.pm` helpers (decimal, ratio, date, datetime)
-* [ ] Implement `VOF.pm` constructors
+* [x] Implement `VOF.pm` constructors
 * [ ] Implement `VOF.pm` readers
 * [ ] Implement `VOF/JSON.pm` decode (JSON → `RAW_T*` values)
 * [ ] Implement `VOF/JSON.pm` encode (typed values → JSON-ready structures)

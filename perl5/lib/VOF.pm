@@ -119,11 +119,11 @@ my @CONSTANTS = qw(
 	VOF_STRMAP VOF_UINTMAP VOF_LIST VOF_NDARRAY
 	VOF_RECORD VOF_SERIES
 	VOF_RAW_TINT VOF_RAW_TSTR VOF_RAW_TLIST
+	$null $true $false
 );
 
 my @CONSTRUCTORS = qw(
 	vof_null vof_bool vof_int vof_uint vof_float vof_string vof_data
-	vof_enum vof_variant
 	vof_decimal vof_ratio vof_percent
 	vof_timestamp vof_date vof_datetime vof_timespan
 	vof_code vof_language vof_country vof_subdivision
@@ -223,6 +223,17 @@ vary by type:
 Callers should use B<constructor functions> to build values and B<reader
 functions> to interpret them.  Direct access to payload slots is possible
 but discouraged.
+
+=head2 Singleton Constants
+
+Three pre-built immutable instances are available as package variables (and
+exported via the C<:constants> tag):
+
+	$VOF::null    # VOF_NULL
+	$VOF::true    # VOF_BOOL 1
+	$VOF::false   # VOF_BOOL 0
+
+C<vof_null()> and C<vof_bool()> return these cached instances.
 
 =head2 C<< VOF::Value->new($tag, @payload) >>
 
@@ -427,6 +438,23 @@ package VOF::Context {
 # ###########################################################################
 
 package VOF;
+
+# ---------------------------------------------------------------------------
+# Singleton constants — reusable immutable values
+# ---------------------------------------------------------------------------
+# Accessible as $VOF::null, $VOF::true, $VOF::false (or imported via
+# :constants).  vof_null() and vof_bool() return these cached instances.
+
+our $null  = VOF::Value->new(VOF_NULL);
+our $true  = VOF::Value->new(VOF_BOOL, 1);
+our $false = VOF::Value->new(VOF_BOOL, 0);
+
+# Internal: croak unless $v is a VOF::Value
+sub _check_value {
+	my ($label, $v) = @_;
+	croak "$label: values must be VOF::Value instances"
+		unless ref $v eq 'VOF::Value';
+}
 
 # ###########################################################################
 # Helper functions
@@ -675,7 +703,7 @@ Returns a C<VOF_NULL> value.
 =cut
 
 sub vof_null {
-	...
+	return $null;
 }
 
 =item C<vof_bool( $value )>
@@ -686,7 +714,7 @@ Returns a C<VOF_BOOL> value.  C<$value> is normalized to C<0> or C<1>.
 
 sub vof_bool {
 	my ($val) = @_;
-	...
+	return $val ? $true : $false;
 }
 
 =item C<vof_int( $value )>
@@ -697,7 +725,8 @@ Returns a C<VOF_INT> (signed integer) value.
 
 sub vof_int {
 	my ($val) = @_;
-	...
+	croak "vof_int: value required" unless defined $val;
+	return VOF::Value->new(VOF_INT, int($val));
 }
 
 =item C<vof_uint( $value )>
@@ -709,7 +738,10 @@ negative.
 
 sub vof_uint {
 	my ($val) = @_;
-	...
+	croak "vof_uint: value required" unless defined $val;
+	my $i = int($val);
+	croak "vof_uint: value must be non-negative" if $i < 0;
+	return VOF::Value->new(VOF_UINT, $i);
 }
 
 =item C<vof_float( $value )>
@@ -720,7 +752,8 @@ Returns a C<VOF_FLOAT> value.
 
 sub vof_float {
 	my ($val) = @_;
-	...
+	croak "vof_float: value required" unless defined $val;
+	return VOF::Value->new(VOF_FLOAT, 0 + $val);
 }
 
 =item C<vof_string( $value )>
@@ -731,7 +764,8 @@ Returns a C<VOF_STRING> value.
 
 sub vof_string {
 	my ($val) = @_;
-	...
+	croak "vof_string: value required" unless defined $val;
+	return VOF::Value->new(VOF_STRING, "$val");
 }
 
 =item C<vof_data( $bytes )>
@@ -742,7 +776,8 @@ Returns a C<VOF_DATA> value containing raw bytes.
 
 sub vof_data {
 	my ($bytes) = @_;
-	...
+	croak "vof_data: value required" unless defined $bytes;
+	return VOF::Value->new(VOF_DATA, $bytes);
 }
 
 =back
@@ -762,7 +797,16 @@ explicit components.  Decimal places must be in the range 0..9.
 
 sub vof_decimal {
 	my @args = @_;
-	...
+	if (@args == 1) {
+		my $d = decimal_of_string($args[0]);
+		croak "vof_decimal: invalid decimal string" unless defined $d;
+		return VOF::Value->new(VOF_DECIMAL, $d->[0], $d->[1]);
+	}
+	croak "vof_decimal: expected 1 or 2 arguments" unless @args == 2;
+	my ($sig, $places) = @args;
+	croak "vof_decimal: places must be 0..9" if $places < 0 || $places > 9;
+	($sig, $places) = decimal_optimize(int($sig), int($places));
+	return VOF::Value->new(VOF_DECIMAL, $sig, $places);
 }
 
 =item C<vof_ratio( $numerator, $denominator )>
@@ -773,7 +817,10 @@ Returns a C<VOF_RATIO> value.  Croaks if denominator is not positive.
 
 sub vof_ratio {
 	my ($n, $d) = @_;
-	...
+	croak "vof_ratio: arguments required" unless defined $n && defined $d;
+	$d = int($d);
+	croak "vof_ratio: denominator must be positive" unless $d > 0;
+	return VOF::Value->new(VOF_RATIO, int($n), $d);
 }
 
 =item C<vof_percent( $string )>
@@ -787,7 +834,18 @@ From a string, C<"50%"> is parsed and divided by 100.
 
 sub vof_percent {
 	my @args = @_;
-	...
+	if (@args == 1) {
+		my $s = $args[0];
+		croak "vof_percent: value required" unless defined $s;
+		my $d = decimal_of_string($s, 2);
+		croak "vof_percent: invalid percent string" unless defined $d;
+		return VOF::Value->new(VOF_PERCENT, $d->[0], $d->[1]);
+	}
+	croak "vof_percent: expected 1 or 2 arguments" unless @args == 2;
+	my ($sig, $places) = @args;
+	croak "vof_percent: places must be 0..9" if $places < 0 || $places > 9;
+	($sig, $places) = decimal_optimize(int($sig), int($places));
+	return VOF::Value->new(VOF_PERCENT, $sig, $places);
 }
 
 =back
@@ -804,7 +862,8 @@ Returns a C<VOF_TIMESTAMP> value (UNIX epoch seconds, signed).
 
 sub vof_timestamp {
 	my ($epoch) = @_;
-	...
+	croak "vof_timestamp: value required" unless defined $epoch;
+	return VOF::Value->new(VOF_TIMESTAMP, int($epoch));
 }
 
 =item C<vof_date( $year, $month, $day )>
@@ -815,7 +874,12 @@ Returns a C<VOF_DATE> value.  Croaks if month is not 1..12 or day is not 1..31.
 
 sub vof_date {
 	my ($y, $m, $d) = @_;
-	...
+	croak "vof_date: year required" unless defined $y;
+	croak "vof_date: month must be 1..12"
+		unless defined $m && $m >= 1 && $m <= 12;
+	croak "vof_date: day must be 1..31"
+		unless defined $d && $d >= 1 && $d <= 31;
+	return VOF::Value->new(VOF_DATE, int($y), int($m), int($d));
 }
 
 =item C<vof_datetime( $year, $month, $day, $hour, $minute )>
@@ -827,7 +891,16 @@ Returns a C<VOF_DATETIME> value.  Croaks if any component is out of range (month
 
 sub vof_datetime {
 	my ($y, $m, $d, $hh, $mm) = @_;
-	...
+	croak "vof_datetime: year required" unless defined $y;
+	croak "vof_datetime: month must be 1..12"
+		unless defined $m && $m >= 1 && $m <= 12;
+	croak "vof_datetime: day must be 1..31"
+		unless defined $d && $d >= 1 && $d <= 31;
+	croak "vof_datetime: hour must be 0..23"
+		unless defined $hh && $hh >= 0 && $hh <= 23;
+	croak "vof_datetime: minute must be 0..59"
+		unless defined $mm && $mm >= 0 && $mm <= 59;
+	return VOF::Value->new(VOF_DATETIME, int($y), int($m), int($d), int($hh), int($mm));
 }
 
 =item C<vof_timespan( $half_months, $days, $seconds )>
@@ -838,7 +911,9 @@ Returns a C<VOF_TIMESPAN> value.  All three components are signed integers.
 
 sub vof_timespan {
 	my ($hm, $d, $s) = @_;
-	...
+	croak "vof_timespan: three arguments required"
+		unless defined $hm && defined $d && defined $s;
+	return VOF::Value->new(VOF_TIMESPAN, int($hm), int($d), int($s));
 }
 
 =back
@@ -867,13 +942,13 @@ specification for details).
 
 =cut
 
-sub vof_code         { my ($s) = @_; ... }
-sub vof_language     { my ($s) = @_; ... }
-sub vof_country      { my ($s) = @_; ... }
-sub vof_subdivision  { my ($s) = @_; ... }
-sub vof_currency     { my ($s) = @_; ... }
-sub vof_tax_code     { my ($s) = @_; ... }
-sub vof_unit         { my ($s) = @_; ... }
+sub vof_code         { croak "vof_code: string required" unless defined $_[0]; VOF::Value->new(VOF_CODE, "$_[0]") }
+sub vof_language     { croak "vof_language: string required" unless defined $_[0]; VOF::Value->new(VOF_LANGUAGE, "$_[0]") }
+sub vof_country      { croak "vof_country: string required" unless defined $_[0]; VOF::Value->new(VOF_COUNTRY, "$_[0]") }
+sub vof_subdivision  { croak "vof_subdivision: string required" unless defined $_[0]; VOF::Value->new(VOF_SUBDIVISION, "$_[0]") }
+sub vof_currency     { croak "vof_currency: string required" unless defined $_[0]; VOF::Value->new(VOF_CURRENCY, "$_[0]") }
+sub vof_tax_code     { croak "vof_tax_code: string required" unless defined $_[0]; VOF::Value->new(VOF_TAX_CODE, "$_[0]") }
+sub vof_unit         { croak "vof_unit: string required" unless defined $_[0]; VOF::Value->new(VOF_UNIT, "$_[0]") }
 
 =back
 
@@ -890,7 +965,12 @@ strings) to text strings, e.g. C<< { en => "Hello", fr => "Bonjour" } >>.
 
 sub vof_text {
 	my ($map) = @_;
-	...
+	croak "vof_text: hashref required" unless ref $map eq 'HASH';
+	for my $v (values %$map) {
+		croak "vof_text: values must be defined strings"
+			unless defined $v && !ref $v;
+	}
+	return VOF::Value->new(VOF_TEXT, { %$map });
 }
 
 =back
@@ -912,7 +992,11 @@ Returns a C<VOF_AMOUNT> value.  C<$currency> (ISO 4217) is optional.
 
 sub vof_amount {
 	my ($sig, $places, $currency) = @_;
-	...
+	croak "vof_amount: significand and places required"
+		unless defined $sig && defined $places;
+	croak "vof_amount: places must be 0..9" if $places < 0 || $places > 9;
+	($sig, $places) = decimal_optimize(int($sig), int($places));
+	return VOF::Value->new(VOF_AMOUNT, $sig, $places, $currency);
 }
 
 =item C<vof_tax( $sig, $places, $tax_code )>
@@ -925,7 +1009,11 @@ Returns a C<VOF_TAX> value.  C<$tax_code> is required; C<$currency> is optional.
 
 sub vof_tax {
 	my ($sig, $places, $tax_code, $currency) = @_;
-	...
+	croak "vof_tax: significand, places and tax_code required"
+		unless defined $sig && defined $places && defined $tax_code;
+	croak "vof_tax: places must be 0..9" if $places < 0 || $places > 9;
+	($sig, $places) = decimal_optimize(int($sig), int($places));
+	return VOF::Value->new(VOF_TAX, $sig, $places, "$tax_code", $currency);
 }
 
 =item C<vof_quantity( $sig, $places )>
@@ -938,7 +1026,11 @@ Returns a C<VOF_QUANTITY> value.  C<$unit> (UN/CEFACT Rec. 20) is optional.
 
 sub vof_quantity {
 	my ($sig, $places, $unit) = @_;
-	...
+	croak "vof_quantity: significand and places required"
+		unless defined $sig && defined $places;
+	croak "vof_quantity: places must be 0..9" if $places < 0 || $places > 9;
+	($sig, $places) = decimal_optimize(int($sig), int($places));
+	return VOF::Value->new(VOF_QUANTITY, $sig, $places, $unit);
 }
 
 =back
@@ -956,7 +1048,10 @@ bytes.
 
 sub vof_ip {
 	my ($bytes) = @_;
-	...
+	croak "vof_ip: bytes required" unless defined $bytes;
+	my $len = length $bytes;
+	croak "vof_ip: must be 4 or 16 bytes" unless $len == 4 || $len == 16;
+	return VOF::Value->new(VOF_IP, $bytes);
 }
 
 =item C<vof_subnet( $bytes, $prefix_len )>
@@ -968,7 +1063,11 @@ is the CIDR prefix length.
 
 sub vof_subnet {
 	my ($bytes, $prefix_len) = @_;
-	...
+	croak "vof_subnet: bytes and prefix_len required"
+		unless defined $bytes && defined $prefix_len;
+	my $len = length $bytes;
+	croak "vof_subnet: must be 4 or 16 bytes" unless $len == 4 || $len == 16;
+	return VOF::Value->new(VOF_SUBNET, $bytes, int($prefix_len));
 }
 
 =item C<vof_coords( $lat, $lon )>
@@ -979,7 +1078,9 @@ Returns a C<VOF_COORDS> value.  C<$lat> and C<$lon> are WGS84 floats.
 
 sub vof_coords {
 	my ($lat, $lon) = @_;
-	...
+	croak "vof_coords: lat and lon required"
+		unless defined $lat && defined $lon;
+	return VOF::Value->new(VOF_COORDS, 0 + $lat, 0 + $lon);
 }
 
 =back
@@ -996,7 +1097,9 @@ Returns a C<VOF_STRMAP> value.  Values must be C<VOF::Value> instances.
 
 sub vof_strmap {
 	my ($map) = @_;
-	...
+	croak "vof_strmap: hashref required" unless ref $map eq 'HASH';
+	_check_value('vof_strmap', $_) for values %$map;
+	return VOF::Value->new(VOF_STRMAP, { %$map });
 }
 
 =item C<vof_uintmap( \%map )>
@@ -1008,7 +1111,13 @@ hash keys); values must be C<VOF::Value> instances.
 
 sub vof_uintmap {
 	my ($map) = @_;
-	...
+	croak "vof_uintmap: hashref required" unless ref $map eq 'HASH';
+	for my $k (keys %$map) {
+		croak "vof_uintmap: keys must be non-negative integers"
+			unless $k =~ /^\d+\z/;
+		_check_value('vof_uintmap', $map->{$k});
+	}
+	return VOF::Value->new(VOF_UINTMAP, { %$map });
 }
 
 =item C<vof_list( \@items )>
@@ -1019,7 +1128,9 @@ Returns a C<VOF_LIST> value.  Items must be C<VOF::Value> instances.
 
 sub vof_list {
 	my ($items) = @_;
-	...
+	croak "vof_list: arrayref required" unless ref $items eq 'ARRAY';
+	_check_value('vof_list', $_) for @$items;
+	return VOF::Value->new(VOF_LIST, [ @$items ]);
 }
 
 =item C<vof_ndarray( \@shape, \@values )>
@@ -1031,7 +1142,18 @@ of dimension sizes; C<@values> must contain exactly their product.
 
 sub vof_ndarray {
 	my ($shape, $values) = @_;
-	...
+	croak "vof_ndarray: shape arrayref required" unless ref $shape eq 'ARRAY';
+	croak "vof_ndarray: values arrayref required" unless ref $values eq 'ARRAY';
+	my $expected = 1;
+	for my $dim (@$shape) {
+		croak "vof_ndarray: dimensions must be positive integers"
+			unless defined $dim && $dim > 0;
+		$expected *= $dim;
+	}
+	croak "vof_ndarray: expected $expected values, got " . scalar(@$values)
+		unless @$values == $expected;
+	_check_value('vof_ndarray', $_) for @$values;
+	return VOF::Value->new(VOF_NDARRAY, [ @$shape ], [ @$values ]);
 }
 
 =back
@@ -1049,7 +1171,9 @@ C<$schema>.
 
 sub vof_enum {
 	my ($schema, $name) = @_;
-	...
+	croak "vof_enum: schema required" unless ref $schema eq 'VOF::Schema';
+	croak "vof_enum: name required" unless defined $name;
+	return VOF::Value->new(VOF_ENUM, $schema, "$name");
 }
 
 =item C<vof_variant( $schema, $name, @args )>
@@ -1061,7 +1185,10 @@ by C<$schema>, carrying zero or more C<VOF::Value> arguments.
 
 sub vof_variant {
 	my ($schema, $name, @args) = @_;
-	...
+	croak "vof_variant: schema required" unless ref $schema eq 'VOF::Schema';
+	croak "vof_variant: name required" unless defined $name;
+	_check_value('vof_variant', $_) for @args;
+	return VOF::Value->new(VOF_VARIANT, $schema, "$name", \@args);
 }
 
 =item C<vof_record( $schema, \%fields )>
@@ -1073,7 +1200,10 @@ C<VOF::Value> instances.
 
 sub vof_record {
 	my ($schema, $fields) = @_;
-	...
+	croak "vof_record: schema required" unless ref $schema eq 'VOF::Schema';
+	croak "vof_record: hashref required" unless ref $fields eq 'HASH';
+	_check_value('vof_record', $_) for values %$fields;
+	return VOF::Value->new(VOF_RECORD, $schema, { %$fields });
 }
 
 =item C<vof_series( $schema, \@records )>
@@ -1086,7 +1216,15 @@ C<< field_name => VOF::Value >>.
 
 sub vof_series {
 	my ($schema, $records) = @_;
-	...
+	croak "vof_series: schema required" unless ref $schema eq 'VOF::Schema';
+	croak "vof_series: arrayref required" unless ref $records eq 'ARRAY';
+	my @checked;
+	for my $rec (@$records) {
+		croak "vof_series: records must be hashrefs" unless ref $rec eq 'HASH';
+		_check_value('vof_series', $_) for values %$rec;
+		push @checked, { %$rec };
+	}
+	return VOF::Value->new(VOF_SERIES, $schema, \@checked);
 }
 
 =back
