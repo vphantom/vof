@@ -76,25 +76,34 @@ Symbol tables are simple 7-bit ASCII files listing symbols in field order and ar
 * Empty lines are ignored;
 * Lines starting with '#' are ignored;
 * Lines starting with a TAB are symbols in the current namespace;
+* Symbol lines may be appended whitespace delimited qualifiers;
 * Other lines are namespace declarations.
 
 ```
 # VOF Symbol Table
 
 com.example.order
-	id
+	id key
+	modified_at req
 	customer
 	lines
 	total
 
 com.example.order.line
-	i
+	i key
 	product
 	qty
 	unit_price
 ```
 
 In the above example, symbol 'customer' in namespace 'com.example.order' is ID `1`.
+
+#### Symbol Qualifiers
+
+* **key** — In records, tags a field as being part of the primary key.
+* **req** — In record references, tags a field to always include along with keys.
+
+Readers should quietly ignore unknown qualifiers, however they should preserve them when updating the file.
 
 ### NDArray
 

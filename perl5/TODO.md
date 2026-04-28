@@ -11,34 +11,22 @@ Goals:
 
 Relevant files from the OCaml implementation: `vof.ml`, `vof_lib.ml`, `vof_json.ml`
 
-## Structure
+## Status
 
-### `VOF.pm`
-
-* Blessed value wrappers (single class with a type tag, or small hierarchy) with exported constructor functions: `vof_decimal("12.50")`, `vof_date(2025,12,31)`, etc.
-* Decimal, Date, Datetime, etc. helpers to/from string
-
-### `VOF/Schema.pm`
-
-Simple constructor for path, keys, required like in OCaml.  Allows helpers like:
-
-```perl
-# Distinguish a full record from a mere reference
-sub is_reference {
-    my ($schema, $fields) = @_;
-    my %allowed = map { $_ => 1 } @{$schema->{keys}}, @{$schema->{required}};
-    return !grep { !$allowed{$_} } keys %$fields;
-}
-```
-
-### `VOF/JSON.pm`
-
-* `encode($vof_value)` — unblessed Perl structure ready for `JSON::encode_json()`, making use of `JSON::true` and `JSON::false` for Bool.  Remember to stringify integers beyond 2^53-1.
-* `decode($perl_structure)` — returns raw VOF values
-* Reader functions like OCaml's, schema-driven interpreters like `read_decimal()`, `read_date()`, etc.
+* [x] Skeleton PM files with POD and stubs: `VOF.pm`, `VOF/JSON.pm`
+* [ ] Implement `VOF.pm` helpers (decimal, ratio, date, datetime)
+* [ ] Implement `VOF.pm` constructors
+* [ ] Implement `VOF.pm` readers
+* [ ] Implement `VOF/JSON.pm` decode (JSON → `RAW_T*` values)
+* [ ] Implement `VOF/JSON.pm` encode (typed values → JSON-ready structures)
+* [ ] IP address formatting (manual vs dependency — TBD)
+* [ ] Tests
 
 ## Design Decisions
 
-* A single `VOF::Value` class (blessed `[$type_tag,@payload]`)
-* Reader pattern like in OCaml, like `vof_read_record($ctx, $schema, $raw, sub { my ($fields) = @_; ... })`
-* It's okay to depend on JSON (or JSON::XS) and MIME::Base64.  Let's see if we need NetAddr::IP or manual formatting.
+* Single `VOF::Value` blessed arrayref class with integer type tags — chosen over a subclass-per-type hierarchy for compactness and fast integer dispatch in readers (which pattern-match heavily).
+* Type tag constants are auto-numbered via `BEGIN`/`qw()` — specific integers are unstable across releases and must not be serialized.
+* Readers live in `VOF.pm` (format-agnostic), not in `VOF/JSON.pm`.  `JSON.pm::decode()` only wraps JSON into `VOF_RAW_T*` values; the shared readers then interpret those.  This avoids duplicating readers when CBOR/Binary codecs arrive.
+* Reader prefix: `as_*` (e.g. `as_decimal`).  Constructor prefix: `vof_*` (e.g. `vof_decimal`).
+* Readers return `undef` on type mismatch.  Constructors `croak` on invalid input.
+* Dependencies: `JSON` (core) and `MIME::Base64` (core).  Evaluate IP formatting needs when implementing network types.
