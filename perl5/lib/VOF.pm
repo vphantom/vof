@@ -379,10 +379,12 @@ package VOF::Context {
 				my %flags = map { $_ => 1 } @quals;
 				my $ns = ($self->{namespaces}{$current_ns} ||= {
 					symbols  => [],
+					sym_ids  => {},
 					keys     => [],
 					required => [],
 				});
 				push @{$ns->{symbols}}, $symbol;
+				$ns->{sym_ids}{$symbol} = $#{$ns->{symbols}};
 				if ($flags{key}) {
 					push @{$ns->{keys}}, $symbol;
 				}
@@ -438,6 +440,12 @@ package VOF::Context {
 		my $ns = $self->{namespaces}{$path} or return undef;
 		my $syms = $ns->{symbols};
 		return ($id >= 0 && $id < scalar @$syms) ? $syms->[$id] : undef;
+	}
+
+	sub id_by_sym {
+		my ($self, $path, $name) = @_;
+		my $ns = $self->{namespaces}{$path} or return undef;
+		return $ns->{sym_ids}{$name};
 	}
 }
 

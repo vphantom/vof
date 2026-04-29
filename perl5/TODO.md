@@ -25,9 +25,9 @@ Relevant files from the OCaml implementation: `vof.ml`, `vof_lib.ml`, `vof_json.
 * [x] Implement `VOF.pm` readers for enum, variant
 * [x] Implement `VOF.pm` reader for record
 * [x] Implement `VOF.pm` reader for series
-* [ ] Implement `VOF/JSON.pm` decode (JSON → `RAW_T*` values)
-* [ ] Implement `VOF/JSON.pm` encode (typed values → JSON-ready structures)
-* [ ] IP address formatting (manual vs dependency — TBD)
+* [x] Implement `VOF/JSON.pm` decode (JSON → `RAW_T*` values)
+* [x] Implement `VOF/JSON.pm` encode (typed values → JSON-ready structures)
+* [x] IP address formatting (using core `Socket` module)
 * [ ] Tests
 
 ## Design Decisions
