@@ -71,6 +71,8 @@ use strict;
 use warnings;
 use Carp qw(croak);
 use Exporter qw(import);
+use MIME::Base64 qw(decode_base64url);
+use Socket qw(AF_INET AF_INET6 inet_pton);
 
 our $VERSION = '0.01';
 
@@ -119,7 +121,6 @@ my @CONSTANTS = qw(
 	VOF_STRMAP VOF_UINTMAP VOF_LIST VOF_NDARRAY
 	VOF_RECORD VOF_SERIES
 	VOF_RAW_TINT VOF_RAW_TSTR VOF_RAW_TLIST
-	$null $true $false
 );
 
 my @CONSTRUCTORS = qw(
@@ -226,12 +227,12 @@ but discouraged.
 
 =head2 Singleton Constants
 
-Three pre-built immutable instances are available as package variables (and
-exported via the C<:constants> tag):
+Three pre-built immutable instances are available as constant subs, intended to
+be used fully qualified (they are not exported):
 
-	$VOF::null    # VOF_NULL
-	$VOF::true    # VOF_BOOL 1
-	$VOF::false   # VOF_BOOL 0
+	VOF::null    # VOF_NULL
+	VOF::true    # VOF_BOOL 1
+	VOF::false   # VOF_BOOL 0
 
 C<vof_null()> and C<vof_bool()> return these cached instances.
 
@@ -431,6 +432,13 @@ package VOF::Context {
 			required => ($ns ? $ns->{required} : ($hint_req  || [])),
 		);
 	}
+
+	sub sym_by_id {
+		my ($self, $path, $id) = @_;
+		my $ns = $self->{namespaces}{$path} or return undef;
+		my $syms = $ns->{symbols};
+		return ($id >= 0 && $id < scalar @$syms) ? $syms->[$id] : undef;
+	}
 }
 
 # ###########################################################################
@@ -448,6 +456,10 @@ package VOF;
 our $null  = VOF::Value->new(VOF_NULL);
 our $true  = VOF::Value->new(VOF_BOOL, 1);
 our $false = VOF::Value->new(VOF_BOOL, 0);
+
+sub null  () { $null }
+sub true  () { $true }
+sub false () { $false }
 
 # Internal: croak unless $v is a VOF::Value
 sub _check_value {
@@ -1248,14 +1260,34 @@ C<< as_decimal($v) >> returns C<[$sig, $places]>.
 
 =item C<as_bool( $v )>
 
-Returns C<0> or C<1>, applying broad truthiness rules (Null and zero are false;
-non-empty strings, lists and maps are true), or C<undef>.
+Returns C<0> or C<1>, or C<undef> for unhandled types.  Null is false; booleans
+pass through; integers and floats test nonzero; decimals, ratios, percents,
+amounts, quantities and taxes test their significand/numerator; text, strmap,
+uintmap and list test non-empty.
 
 =cut
 
 sub as_bool {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_NULL) { return 0 }
+	if ($t == VOF_BOOL) { return $v->[1] }
+	if ($t == VOF_INT || $t == VOF_UINT || $t == VOF_RAW_TINT) {
+		return $v->[1] != 0 ? 1 : 0;
+	}
+	if ($t == VOF_FLOAT) { return $v->[1] != 0.0 ? 1 : 0 }
+	if ($t == VOF_DECIMAL || $t == VOF_RATIO || $t == VOF_PERCENT) {
+		return $v->[1] != 0 ? 1 : 0;
+	}
+	if ($t == VOF_AMOUNT || $t == VOF_QUANTITY || $t == VOF_TAX) {
+		return $v->[1] != 0 ? 1 : 0;
+	}
+	if ($t == VOF_TEXT || $t == VOF_STRMAP || $t == VOF_UINTMAP) {
+		return keys(%{$v->[1]}) ? 1 : 0;
+	}
+	if ($t == VOF_LIST) { return @{$v->[1]} ? 1 : 0 }
+	return undef;
 }
 
 =item C<as_int( $v )>
@@ -1266,7 +1298,15 @@ Returns a signed integer, or C<undef>.
 
 sub as_int {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_RAW_TINT || $t == VOF_INT || $t == VOF_UINT) {
+		return $v->[1];
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		return $v->[1] =~ /^-?\d+\z/ ? 0 + $v->[1] : undef;
+	}
+	return undef;
 }
 
 =item C<as_uint( $v )>
@@ -1277,7 +1317,18 @@ Returns a non-negative integer, or C<undef>.
 
 sub as_uint {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_RAW_TINT || $t == VOF_UINT) {
+		return $v->[1];
+	}
+	if ($t == VOF_INT) {
+		return $v->[1] >= 0 ? $v->[1] : undef;
+	}
+	if ($t == VOF_RAW_TSTR) {
+		return $v->[1] =~ /^-?\d+\z/ ? 0 + $v->[1] : undef;
+	}
+	return undef;
 }
 
 =item C<as_float( $v )>
@@ -1288,7 +1339,18 @@ Returns a floating-point number, or C<undef>.
 
 sub as_float {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_FLOAT) { return $v->[1] }
+	if ($t == VOF_RAW_TINT || $t == VOF_INT || $t == VOF_UINT) {
+		return 0.0 + $v->[1];
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		my $s = $v->[1];
+		return $s =~ /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\z/
+			? 0.0 + $s : undef;
+	}
+	return undef;
 }
 
 =item C<as_string( $v )>
@@ -1299,7 +1361,18 @@ Returns a string, or C<undef>.  Integers are stringified.
 
 sub as_string {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_STRING || $t == VOF_RAW_TSTR
+		|| $t == VOF_CODE || $t == VOF_LANGUAGE || $t == VOF_COUNTRY
+		|| $t == VOF_SUBDIVISION || $t == VOF_CURRENCY
+		|| $t == VOF_TAX_CODE || $t == VOF_UNIT) {
+		return $v->[1];
+	}
+	if ($t == VOF_INT || $t == VOF_UINT || $t == VOF_RAW_TINT) {
+		return "$v->[1]";
+	}
+	return undef;
 }
 
 =item C<as_data( $v )>
@@ -1310,7 +1383,13 @@ Returns a raw byte string, or C<undef>.
 
 sub as_data {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_DATA) { return $v->[1] }
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		return decode_base64url($v->[1]);
+	}
+	return undef;
 }
 
 =back
@@ -1338,13 +1417,13 @@ as L</as_string> and return a string or C<undef>.
 
 =cut
 
-sub as_code         { my ($v) = @_; ... }
-sub as_language     { my ($v) = @_; ... }
-sub as_country      { my ($v) = @_; ... }
-sub as_subdivision  { my ($v) = @_; ... }
-sub as_currency     { my ($v) = @_; ... }
-sub as_tax_code     { my ($v) = @_; ... }
-sub as_unit         { my ($v) = @_; ... }
+sub as_code         { goto &as_string }
+sub as_language     { goto &as_string }
+sub as_country      { goto &as_string }
+sub as_subdivision  { goto &as_string }
+sub as_currency     { goto &as_string }
+sub as_tax_code     { goto &as_string }
+sub as_unit         { goto &as_string }
 
 =back
 
@@ -1361,7 +1440,15 @@ integers (CBOR decimal-in-int encoding) and strings.
 
 sub as_decimal {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_DECIMAL || $t == VOF_PERCENT) {
+		return [$v->[1], $v->[2]];
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		return decimal_of_string($v->[1]);
+	}
+	return undef;
 }
 
 =item C<as_ratio( $v )>
@@ -1372,7 +1459,24 @@ Returns C<[$numerator, $denominator]> or C<undef>.
 
 sub as_ratio {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_RATIO) {
+		return [$v->[1], $v->[2]];
+	}
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		if (@$items == 2) {
+			my $n = as_int($items->[0]);
+			my $d = as_uint($items->[1]);
+			return (defined $n && defined $d) ? [$n, $d] : undef;
+		}
+		return undef;
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		return ratio_of_string($v->[1]);
+	}
+	return undef;
 }
 
 =item C<as_percent( $v )>
@@ -1384,7 +1488,22 @@ Accepts strings with a trailing C<%> sign.
 
 sub as_percent {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_PERCENT || $t == VOF_DECIMAL) {
+		return [$v->[1], $v->[2]];
+	}
+	if ($t == VOF_RAW_TINT) {
+		return [decimal_optimize($v->[1], 2)];
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		my $s = $v->[1];
+		if (length($s) > 1 && substr($s, -1) eq '%') {
+			return decimal_of_string($s, 2);
+		}
+		return undef;
+	}
+	return undef;
 }
 
 =back
@@ -1401,7 +1520,16 @@ Returns a UNIX epoch integer, or C<undef>.
 
 sub as_timestamp {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_TIMESTAMP || $t == VOF_UINT || $t == VOF_INT
+		|| $t == VOF_RAW_TINT) {
+		return $v->[1];
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		return $v->[1] =~ /^-?\d+\z/ ? 0 + $v->[1] : undef;
+	}
+	return undef;
 }
 
 =item C<as_date( $v )>
@@ -1413,7 +1541,34 @@ three-element lists, or typed date/datetime values.
 
 sub as_date {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_DATE) {
+		return [$v->[1], $v->[2], $v->[3]];
+	}
+	if ($t == VOF_DATETIME) {
+		return [$v->[1], $v->[2], $v->[3]];
+	}
+	if ($t == VOF_RAW_TINT) {
+		return date_of_human($v->[1]);
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		my $s = $v->[1];
+		return undef unless $s =~ /^-?\d+\z/;
+		return date_of_human(0 + $s);
+	}
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		if (@$items == 3) {
+			my $y = as_int($items->[0]);
+			my $m = as_int($items->[1]);
+			my $d = as_int($items->[2]);
+			return undef unless defined $y && defined $m && defined $d;
+			return undef unless $m >= 1 && $m <= 12 && $d >= 1 && $d <= 31;
+			return [$y, $m, $d];
+		}
+	}
+	return undef;
 }
 
 =item C<as_datetime( $v )>
@@ -1426,7 +1581,40 @@ C<YYYYMMDDHHMM> integers, five-element lists, or typed date/datetime values
 
 sub as_datetime {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_DATETIME) {
+		return [$v->[1], $v->[2], $v->[3], $v->[4], $v->[5]];
+	}
+	if ($t == VOF_DATE) {
+		return [$v->[1], $v->[2], $v->[3], 0, 0];
+	}
+	if ($t == VOF_RAW_TINT) {
+		return datetime_of_human($v->[1]);
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		my $s = $v->[1];
+		return undef unless $s =~ /^-?\d+\z/;
+		return datetime_of_human(0 + $s);
+	}
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		if (@$items == 5) {
+			my $y  = as_int($items->[0]);
+			my $m  = as_int($items->[1]);
+			my $d  = as_int($items->[2]);
+			my $hh = as_int($items->[3]);
+			my $mm = as_int($items->[4]);
+			return undef unless defined $y && defined $m && defined $d
+				&& defined $hh && defined $mm;
+			return undef unless $m >= 1 && $m <= 12
+				&& $d >= 1 && $d <= 31
+				&& $hh >= 0 && $hh <= 23
+				&& $mm >= 0 && $mm <= 59;
+			return [$y, $m, $d, $hh, $mm];
+		}
+	}
+	return undef;
 }
 
 =item C<as_timespan( $v )>
@@ -1437,10 +1625,61 @@ Returns C<[$half_months, $days, $seconds]> or C<undef>.
 
 sub as_timespan {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_TIMESPAN) {
+		return [$v->[1], $v->[2], $v->[3]];
+	}
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		if (@$items == 3) {
+			my $a = as_int($items->[0]);
+			my $b = as_int($items->[1]);
+			my $c = as_int($items->[2]);
+			return (defined $a && defined $b && defined $c)
+				? [$a, $b, $c] : undef;
+		}
+	}
+	return undef;
 }
 
 =back
+
+# Internal: shared parser for amount and quantity (decimal + optional qualifier)
+sub _as_decimal_qual {
+	my ($v) = @_;
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+
+	# String: "12.50" or "12.50 USD"
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		my @parts = split / /, $v->[1];
+		if (@parts == 1) {
+			my $d = decimal_of_string($parts[0]);
+			return defined $d ? [$d->[0], $d->[1], undef] : undef;
+		}
+		if (@parts == 2) {
+			my $d = decimal_of_string($parts[0]);
+			return defined $d ? [$d->[0], $d->[1], $parts[1]] : undef;
+		}
+		return undef;
+	}
+
+	# List of 2: [decimal, qualifier]
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		if (@$items == 2) {
+			my $d = as_decimal($items->[0]);
+			my $c = as_string($items->[1]);
+			return (defined $d && defined $c)
+				? [$d->[0], $d->[1], $c] : undef;
+		}
+	}
+
+	# Bare value: try as decimal without qualifier
+	my $d = as_decimal($v);
+	return defined $d ? [$d->[0], $d->[1], undef] : undef;
+}
 
 =head2 Qualified Decimal Readers
 
@@ -1455,7 +1694,11 @@ amounts, strings like C<"12.50 USD">, or bare decimals.
 
 sub as_amount {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	if ($v->[0] == VOF_AMOUNT) {
+		return [$v->[1], $v->[2], $v->[3]];
+	}
+	return _as_decimal_qual($v);
 }
 
 =item C<as_tax( $v )>
@@ -1466,7 +1709,42 @@ Returns C<[$sig, $places, $tax_code, $currency_or_undef]> or C<undef>.
 
 sub as_tax {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_TAX) {
+		return [$v->[1], $v->[2], $v->[3], $v->[4]];
+	}
+
+	# List of 2: [decimal, tax_code]
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		if (@$items == 2) {
+			my $d = as_decimal($items->[0]);
+			my $tc = as_string($items->[1]);
+			return (defined $d && defined $tc)
+				? [$d->[0], $d->[1], $tc, undef] : undef;
+		}
+		return undef;
+	}
+
+	# String: "12.50 GST" or "12.50 USD GST"
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		my @parts = split / /, $v->[1];
+		if (@parts == 2) {
+			my $d = decimal_of_string($parts[0]);
+			return defined $d
+				? [$d->[0], $d->[1], $parts[1], undef] : undef;
+		}
+		if (@parts == 3) {
+			# "dec curr tax_code" → return [dec, tax_code, curr]
+			my $d = decimal_of_string($parts[0]);
+			return defined $d
+				? [$d->[0], $d->[1], $parts[2], $parts[1]] : undef;
+		}
+		return undef;
+	}
+
+	return undef;
 }
 
 =item C<as_quantity( $v )>
@@ -1477,7 +1755,11 @@ Returns C<[$sig, $places, $unit_or_undef]> or C<undef>.
 
 sub as_quantity {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	if ($v->[0] == VOF_QUANTITY) {
+		return [$v->[1], $v->[2], $v->[3]];
+	}
+	return _as_decimal_qual($v);
 }
 
 =back
@@ -1494,7 +1776,11 @@ Returns a hashref C<< { lang_code => string, ... } >> or C<undef>.
 
 sub as_text {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	if ($v->[0] == VOF_TEXT) {
+		return $v->[1];
+	}
+	return as_strmap($v, \&as_string);
 }
 
 =back
@@ -1509,9 +1795,26 @@ Returns 4 or 16 raw bytes, or C<undef>.
 
 =cut
 
+# Internal: parse an IP address string to 4 or 16 raw bytes, or undef.
+sub _parse_ip {
+	my ($s) = @_;
+	my $bytes = inet_pton(AF_INET, $s);
+	return $bytes if defined $bytes;
+	$bytes = inet_pton(AF_INET6, $s);
+	return $bytes;
+}
+
 sub as_ip {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_IP || $t == VOF_DATA) {
+		return $v->[1];
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		return _parse_ip($v->[1]);
+	}
+	return undef;
 }
 
 =item C<as_subnet( $v )>
@@ -1522,7 +1825,31 @@ Returns C<[$bytes, $prefix_len]> or C<undef>.  Accepts CIDR strings.
 
 sub as_subnet {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_SUBNET) {
+		return [$v->[1], $v->[2]];
+	}
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		if (@$items == 2) {
+			my $ip = as_ip($items->[0]);
+			my $n  = as_uint($items->[1]);
+			return (defined $ip && defined $n) ? [$ip, $n] : undef;
+		}
+		return undef;
+	}
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		my ($addr, $len) = split m{/}, $v->[1], 2;
+		return undef unless defined $addr && defined $len && $len =~ /^\d+\z/;
+		my $bytes = _parse_ip($addr);
+		return undef unless defined $bytes;
+		$len = 0 + $len;
+		my $max = length($bytes) == 4 ? 32 : 128;
+		return undef if $len > $max;
+		return [$bytes, $len];
+	}
+	return undef;
 }
 
 =item C<as_coords( $v )>
@@ -1533,7 +1860,20 @@ Returns C<[$lat, $lon]> or C<undef>.
 
 sub as_coords {
 	my ($v) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_COORDS) {
+		return [$v->[1], $v->[2]];
+	}
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		if (@$items == 2) {
+			my $a = as_float($items->[0]);
+			my $b = as_float($items->[1]);
+			return (defined $a && defined $b) ? [$a, $b] : undef;
+		}
+	}
+	return undef;
 }
 
 =back
@@ -1554,7 +1894,31 @@ read fails.
 
 sub as_strmap {
 	my ($v, $reader) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_STRMAP) {
+		my %result;
+		for my $k (keys %{$v->[1]}) {
+			my $r = $reader->($v->[1]{$k});
+			return undef unless defined $r;
+			$result{$k} = $r;
+		}
+		return \%result;
+	}
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		return undef if @$items % 2;
+		my %result;
+		for (my $i = 0; $i < @$items; $i += 2) {
+			my $k = as_string($items->[$i]);
+			return undef unless defined $k;
+			my $r = $reader->($items->[$i + 1]);
+			return undef unless defined $r;
+			$result{$k} = $r;
+		}
+		return \%result;
+	}
+	return undef;
 }
 
 =item C<as_uintmap( $v, \&value_reader )>
@@ -1565,7 +1929,31 @@ Returns a hashref C<< { uint => value, ... } >> or C<undef>.
 
 sub as_uintmap {
 	my ($v, $reader) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_UINTMAP) {
+		my %result;
+		for my $k (keys %{$v->[1]}) {
+			my $r = $reader->($v->[1]{$k});
+			return undef unless defined $r;
+			$result{$k} = $r;
+		}
+		return \%result;
+	}
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		return undef if @$items % 2;
+		my %result;
+		for (my $i = 0; $i < @$items; $i += 2) {
+			my $k = as_int($items->[$i]);
+			return undef unless defined $k;
+			my $r = $reader->($items->[$i + 1]);
+			return undef unless defined $r;
+			$result{$k} = $r;
+		}
+		return \%result;
+	}
+	return undef;
 }
 
 =item C<as_list( $v, \&item_reader )>
@@ -1577,7 +1965,18 @@ through C<\&item_reader>.
 
 sub as_list {
 	my ($v, $reader) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_LIST || $t == VOF_RAW_TLIST) {
+		my @result;
+		for my $item (@{$v->[1]}) {
+			my $r = $reader->($item);
+			return undef unless defined $r;
+			push @result, $r;
+		}
+		return \@result;
+	}
+	return undef;
 }
 
 =item C<as_ndarray( $v, \&item_reader )>
@@ -1588,7 +1987,39 @@ Returns C<[\@shape, \@values]> or C<undef>.
 
 sub as_ndarray {
 	my ($v, $reader) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_NDARRAY) {
+		my $shape = $v->[1];
+		my $vals  = $v->[2];
+		my $expected = 1;
+		$expected *= $_ for @$shape;
+		return undef unless $expected == scalar @$vals;
+		my @result;
+		for my $item (@$vals) {
+			my $r = $reader->($item);
+			return undef unless defined $r;
+			push @result, $r;
+		}
+		return [$shape, \@result];
+	}
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		return undef unless @$items >= 1;
+		my $shape = as_list($items->[0], \&as_int);
+		return undef unless defined $shape;
+		my $expected = 1;
+		$expected *= $_ for @$shape;
+		return undef unless $expected == @$items - 1;
+		my @result;
+		for my $i (1 .. $#$items) {
+			my $r = $reader->($items->[$i]);
+			return undef unless defined $r;
+			push @result, $r;
+		}
+		return [$shape, \@result];
+	}
+	return undef;
 }
 
 =back
@@ -1608,9 +2039,56 @@ returns, or C<undef> if the value cannot be interpreted.
 
 =cut
 
+# Internal: resolve the identifier element of a variant/enum list to a name.
+# Accepts strings directly, looks up integers in the context symbol table.
+sub _resolve_variant_id {
+	my ($ctx, $schema, $v) = @_;
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+	if ($t == VOF_STRING || $t == VOF_RAW_TSTR) {
+		return $v->[1];
+	}
+	if ($t == VOF_RAW_TINT || $t == VOF_INT || $t == VOF_UINT) {
+		return $ctx->sym_by_id($schema->{path}, $v->[1]);
+	}
+	return undef;
+}
+
 sub as_variant {
 	my ($ctx, $schema, $v, $cb) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+
+	# Typed enum/variant — pass through directly
+	if ($t == VOF_ENUM) {
+		return $cb->($v->[2], []);
+	}
+	if ($t == VOF_VARIANT) {
+		return $cb->($v->[2], $v->[3]);
+	}
+
+	# Bare string — zero-arg variant (enum)
+	if ($t == VOF_STRING || $t == VOF_RAW_TSTR) {
+		return $cb->($v->[1], []);
+	}
+
+	# List: [name_or_id, args...]
+	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
+		my $items = $v->[1];
+		return undef unless @$items >= 1;
+		my $name = _resolve_variant_id($ctx, $schema, $items->[0]);
+		return undef unless defined $name;
+		my @args = @{$items}[1 .. $#$items];
+		return $cb->($name, \@args);
+	}
+
+	# Bare integer — look up enum ID in symbol table
+	if ($t == VOF_RAW_TINT || $t == VOF_INT || $t == VOF_UINT) {
+		my $name = $ctx->sym_by_id($schema->{path}, $v->[1]);
+		return defined $name ? $cb->($name, []) : undef;
+	}
+
+	return undef;
 }
 
 =item C<as_record( $ctx, $schema, $v, \&callback )>
@@ -1622,7 +2100,28 @@ values.  Returns whatever the callback returns, or C<undef>.
 
 sub as_record {
 	my ($ctx, $schema, $v, $cb) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+
+	# Typed record — pass fields directly
+	if ($t == VOF_RECORD) {
+		return $cb->($v->[2]);
+	}
+
+	# JSON wire format: flat list of alternating [key, value, ...]
+	if ($t == VOF_RAW_TLIST) {
+		my $items = $v->[1];
+		return undef if @$items % 2;
+		my %fields;
+		for (my $i = 0; $i < @$items; $i += 2) {
+			my $k = as_string($items->[$i]);
+			return undef unless defined $k;
+			$fields{$k} = $items->[$i + 1];
+		}
+		return $cb->(\%fields);
+	}
+
+	return undef;
 }
 
 =item C<as_series( $ctx, $schema, $v, \&callback )>
@@ -1637,7 +2136,52 @@ Returns C<\@results> or C<undef>.
 
 sub as_series {
 	my ($ctx, $schema, $v, $cb) = @_;
-	...
+	return undef unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+
+	# Typed series — iterate records directly
+	if ($t == VOF_SERIES) {
+		my @results;
+		for my $rec (@{$v->[2]}) {
+			my $r = $cb->($rec);
+			return undef unless defined $r;
+			push @results, $r;
+		}
+		return \@results;
+	}
+
+	# JSON wire format: [field_names_row, row, row, ...] or empty []
+	if ($t == VOF_RAW_TLIST) {
+		my $items = $v->[1];
+		return [] unless @$items;
+
+		# First element: list of field name strings
+		my $names = as_list($items->[0], \&as_string);
+		return undef unless defined $names;
+
+		my @results;
+		for my $i (1 .. $#$items) {
+			my $row = $items->[$i];
+			return undef unless ref $row eq 'VOF::Value';
+			my $rt = $row->[0];
+			return undef unless $rt == VOF_RAW_TLIST || $rt == VOF_LIST;
+			my $vals = $row->[1];
+
+			my %fields;
+			for my $j (0 .. $#$names) {
+				$fields{$names->[$j]} = $j < @$vals
+					? $vals->[$j]
+					: $null;
+			}
+
+			my $r = $cb->(\%fields);
+			return undef unless defined $r;
+			push @results, $r;
+		}
+		return \@results;
+	}
+
+	return undef;
 }
 
 =back

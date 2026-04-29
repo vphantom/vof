@@ -16,7 +16,15 @@ Relevant files from the OCaml implementation: `vof.ml`, `vof_lib.ml`, `vof_json.
 * [x] Implement `VOF::Context` (load symbol tables, schema lookup)
 * [x] Implement `VOF.pm` helpers (decimal, ratio, date, datetime)
 * [x] Implement `VOF.pm` constructors
-* [ ] Implement `VOF.pm` readers
+* [x] Implement `VOF.pm` readers for bool and numeric types
+* [x] Implement `VOF.pm` readers for string/data types
+* [x] Implement `VOF.pm` readers for compound numeric types (amount, tax, quantity)
+* [x] Implement `VOF.pm` readers for temporal types
+* [x] Implement `VOF.pm` readers for ip, subnet, coords
+* [x] Implement `VOF.pm` readers for collections (strmap, uintmap, text, list, ndarray)
+* [x] Implement `VOF.pm` readers for enum, variant
+* [x] Implement `VOF.pm` reader for record
+* [x] Implement `VOF.pm` reader for series
 * [ ] Implement `VOF/JSON.pm` decode (JSON → `RAW_T*` values)
 * [ ] Implement `VOF/JSON.pm` encode (typed values → JSON-ready structures)
 * [ ] IP address formatting (manual vs dependency — TBD)
