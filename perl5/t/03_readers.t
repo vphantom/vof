@@ -27,6 +27,20 @@ subtest 'as_bool' => sub {
 	is(as_bool(vof_text({})), 0, "empty text → false");
 	is(as_bool(vof_list([])), 0, "empty list → false");
 	is(as_bool(vof_list([vof_int(1)])), 1, "non-empty list → true");
+	is(as_bool(vof_uint(1)), 1, "nonzero uint → true");
+	is(as_bool(vof_uint(0)), 0, "zero uint → false");
+	is(as_bool(vof_ratio(3, 4)), 1, "nonzero ratio → true");
+	is(as_bool(vof_ratio(0, 1)), 0, "zero ratio → false");
+	is(as_bool(vof_percent("50%")), 1, "nonzero percent → true");
+	is(as_bool(vof_percent(0, 0)), 0, "zero percent → false");
+	is(as_bool(vof_quantity(5, 0, "KGM")), 1, "nonzero quantity → true");
+	is(as_bool(vof_quantity(0, 0)), 0, "zero quantity → false");
+	is(as_bool(vof_tax(125, 1, "GST")), 1, "nonzero tax → true");
+	is(as_bool(vof_tax(0, 0, "GST")), 0, "zero tax → false");
+	is(as_bool(vof_strmap({ a => vof_int(1) })), 1, "non-empty strmap → true");
+	is(as_bool(vof_strmap({})), 0, "empty strmap → false");
+	is(as_bool(vof_uintmap({ 0 => vof_int(1) })), 1, "non-empty uintmap → true");
+	is(as_bool(vof_uintmap({})), 0, "empty uintmap → false");
 	is(as_bool(raw_int(5)), 1, "raw int nonzero");
 	is(as_bool(raw_int(0)), 0, "raw int zero");
 	is(as_bool(undef), undef, "undef → undef");
@@ -43,6 +57,8 @@ subtest 'as_int' => sub {
 	is(as_int(raw_str("123")), 123, "raw string of digits");
 	is(as_int(raw_str("-5")), -5, "raw string negative");
 	is(as_int(raw_str("abc")), undef, "raw non-numeric string");
+	is(as_int(vof_string("77")), 77, "typed string of digits");
+	is(as_int(vof_string("abc")), undef, "typed non-numeric string");
 	is(as_int(vof_float(1.5)), undef, "float → undef");
 	is(as_int(undef), undef, "undef");
 };
@@ -54,6 +70,8 @@ subtest 'as_uint' => sub {
 	is(as_uint(vof_uint(10)), 10, "typed uint");
 	is(as_uint(vof_int(5)), 5, "positive int → uint");
 	is(as_uint(vof_int(-1)), undef, "negative int → undef");
+	is(as_uint(raw_str("99")), 99, "raw string of digits");
+	is(as_uint(raw_str("abc")), undef, "raw non-numeric string");
 	is(as_uint(vof_float(1.0)), undef, "float → undef");
 };
 
@@ -64,7 +82,13 @@ subtest 'as_float' => sub {
 	is(as_float(raw_int(42)), 42.0, "raw int → float");
 	ok(abs(as_float(raw_str("2.5")) - 2.5) < 1e-10, "raw string → float");
 	ok(abs(as_float(raw_str("1e3")) - 1000) < 1e-10, "scientific notation");
+	is(as_float(vof_int(7)), 7.0, "typed int → float");
+	is(as_float(vof_uint(3)), 3.0, "typed uint → float");
+	ok(abs(as_float(vof_string("2.5")) - 2.5) < 1e-10, "typed string → float");
+	is(as_float(vof_string("abc")), undef, "typed non-numeric string");
 	is(as_float(raw_str("abc")), undef, "non-numeric string");
+	is(as_float(vof_null()), undef, "null → undef");
+	is(as_float(vof_bool(1)), undef, "bool → undef");
 };
 
 # ===== as_string =====
@@ -75,6 +99,8 @@ subtest 'as_string' => sub {
 	is(as_string(vof_int(42)), "42", "int stringified");
 	is(as_string(vof_code("ABC")), "ABC", "code → string");
 	is(as_string(vof_currency("USD")), "USD", "currency → string");
+	is(as_string(vof_uint(10)), "10", "uint stringified");
+	is(as_string(raw_int(77)), "77", "raw int stringified");
 	is(as_string(vof_float(1.5)), undef, "float → undef");
 };
 
@@ -83,7 +109,8 @@ subtest 'as_string' => sub {
 subtest 'as_data' => sub {
 	is(as_data(vof_data("\x00\xFF")), "\x00\xFF", "typed data passthrough");
 	# base64url round-trip: "AAAA" decodes to "\x00\x00\x00"
-	is(as_data(raw_str("AAAA")), "\x00\x00\x00", "base64url decode");
+	is(as_data(raw_str("AAAA")), "\x00\x00\x00", "base64url decode from raw_str");
+	is(as_data(vof_string("AAAA")), "\x00\x00\x00", "base64url decode from typed string");
 	is(as_data(raw_int(42)), undef, "int → undef");
 };
 
@@ -106,6 +133,7 @@ subtest 'as_decimal' => sub {
 	is_deeply(as_decimal(vof_decimal("12.50")), [125, 1], "typed decimal");
 	is_deeply(as_decimal(raw_str("3.14")), [314, 2], "raw string");
 	is_deeply(as_decimal(vof_percent(5, 1)), [5, 1], "percent → decimal");
+	is_deeply(as_decimal(vof_string("7.25")), [725, 2], "typed string");
 	is(as_decimal(raw_int(42)), undef, "raw int → undef");
 	is(as_decimal(raw_str("abc")), undef, "non-numeric string");
 };
@@ -117,8 +145,11 @@ subtest 'as_ratio' => sub {
 	is_deeply(as_ratio(raw_str("1/3")), [1, 3], "raw string");
 	is_deeply(as_ratio(raw_list([raw_int(5), raw_int(8)])),
 		[5, 8], "raw list of two ints");
+	is_deeply(as_ratio(vof_list([vof_int(5), vof_uint(8)])),
+		[5, 8], "typed list of two ints");
 	is(as_ratio(raw_str("abc")), undef, "non-ratio string");
 	is(as_ratio(raw_list([raw_int(1)])), undef, "list wrong size");
+	is(as_ratio(raw_int(42)), undef, "bare int → undef");
 };
 
 # ===== as_percent =====
@@ -129,8 +160,11 @@ subtest 'as_percent' => sub {
 	is_deeply(as_percent(raw_str("50%")), [5, 1], "raw string 50%");
 	is_deeply(as_percent(raw_str("12.5%")), [125, 3], "raw string 12.5%");
 	is_deeply(as_percent(raw_int(50)), [5, 1], "raw int 50 → 0.5");
+	is_deeply(as_percent(vof_string("50%")), [5, 1], "typed string 50%");
+	is(as_percent(vof_string("50")), undef, "typed string without % → undef");
 	is(as_percent(raw_str("50")), undef, "raw string without % → undef");
 	is(as_percent(raw_str("%")), undef, "bare % → undef");
+	is(as_percent(vof_null()), undef, "null → undef");
 };
 
 # ===== as_timestamp =====
@@ -139,7 +173,12 @@ subtest 'as_timestamp' => sub {
 	is(as_timestamp(vof_timestamp(1700000000)), 1700000000, "typed");
 	is(as_timestamp(raw_int(1700000000)), 1700000000, "raw int");
 	is(as_timestamp(raw_str("1700000000")), 1700000000, "raw string");
+	is(as_timestamp(vof_uint(1700000000)), 1700000000, "typed uint");
+	is(as_timestamp(vof_int(1700000000)), 1700000000, "typed int");
+	is(as_timestamp(vof_string("1700000000")), 1700000000, "typed string");
+	is(as_timestamp(vof_string("abc")), undef, "typed non-numeric string");
 	is(as_timestamp(raw_str("abc")), undef, "non-numeric");
+	is(as_timestamp(vof_null()), undef, "null → undef");
 };
 
 # ===== as_date =====
@@ -152,8 +191,14 @@ subtest 'as_date' => sub {
 	is_deeply(as_date(raw_str("20250101")), [2025, 1, 1], "raw string");
 	is_deeply(as_date(raw_list([raw_int(2025), raw_int(6), raw_int(15)])),
 		[2025, 6, 15], "raw list of 3 ints");
+	is_deeply(as_date(vof_string("20250615")), [2025, 6, 15], "typed string YYYYMMDD");
+	is(as_date(vof_string("abc")), undef, "typed non-numeric string");
+	is_deeply(as_date(vof_list([vof_int(2025), vof_int(6), vof_int(15)])),
+		[2025, 6, 15], "typed list of 3 ints");
+	is(as_date(raw_list([raw_int(2025), raw_int(6)])), undef, "list length 2 → undef");
 	is(as_date(raw_int(20251301)), undef, "bad month");
 	is(as_date(raw_str("abc")), undef, "non-numeric string");
+	is(as_date(vof_null()), undef, "null → undef");
 };
 
 # ===== as_datetime =====
@@ -169,6 +214,17 @@ subtest 'as_datetime' => sub {
 		raw_list([raw_int(2025), raw_int(6), raw_int(15), raw_int(14), raw_int(30)])),
 		[2025, 6, 15, 14, 30], "raw list of 5 ints");
 	is(as_datetime(raw_int(202512312400)), undef, "bad hour");
+	is_deeply(as_datetime(raw_str("202506151430")),
+		[2025, 6, 15, 14, 30], "raw string YYYYMMDDHHMM");
+	is_deeply(as_datetime(vof_string("202512312359")),
+		[2025, 12, 31, 23, 59], "typed string YYYYMMDDHHMM");
+	is(as_datetime(vof_string("abc")), undef, "typed non-numeric string");
+	is_deeply(as_datetime(
+		vof_list([vof_int(2025), vof_int(6), vof_int(15), vof_int(14), vof_int(30)])),
+		[2025, 6, 15, 14, 30], "typed list of 5 ints");
+	is(as_datetime(raw_list([raw_int(2025), raw_int(6), raw_int(15)])),
+		undef, "list length 3 → undef");
+	is(as_datetime(vof_null()), undef, "null → undef");
 };
 
 # ===== as_timespan =====
@@ -178,6 +234,9 @@ subtest 'as_timespan' => sub {
 	is_deeply(as_timespan(raw_list([raw_int(24), raw_int(-1), raw_int(0)])),
 		[24, -1, 0], "raw list");
 	is(as_timespan(raw_list([raw_int(1), raw_int(2)])), undef, "wrong size");
+	is_deeply(as_timespan(vof_list([vof_int(24), vof_int(-1), vof_int(0)])),
+		[24, -1, 0], "typed list");
+	is(as_timespan(vof_null()), undef, "null → undef");
 };
 
 # ===== as_amount =====
@@ -187,6 +246,21 @@ subtest 'as_amount' => sub {
 	is_deeply(as_amount(raw_str("12.5 USD")), [125, 1, "USD"], "string with currency");
 	is_deeply(as_amount(raw_str("12.5")), [125, 1, undef], "string bare");
 	is_deeply(as_amount(raw_str("0")), [0, 0, undef], "zero string");
+	is_deeply(as_amount(vof_string("12.5 USD")), [125, 1, "USD"],
+		"typed string with currency");
+	is_deeply(as_amount(vof_string("12.5")), [125, 1, undef],
+		"typed string bare");
+	is_deeply(as_amount(raw_list([raw_str("12.5"), raw_str("USD")])),
+		[125, 1, "USD"], "raw list pair");
+	is_deeply(as_amount(vof_list([vof_decimal("12.5"), vof_string("USD")])),
+		[125, 1, "USD"], "typed list pair");
+	is_deeply(as_amount(vof_decimal("12.5")), [125, 1, undef],
+		"bare decimal fallback");
+	is(as_amount(raw_str("1 2 3")), undef, "string with 3 parts → undef");
+	is(as_amount(raw_list([raw_str("1"), raw_str("2"), raw_str("3")])),
+		undef, "raw list size 3 → undef (falls through)");
+	is(as_amount(vof_list([vof_string("1"), vof_string("2"), vof_string("3")])),
+		undef, "typed list size 3 → undef (falls through)");
 };
 
 # ===== as_tax =====
@@ -201,6 +275,16 @@ subtest 'as_tax' => sub {
 	is_deeply(as_tax(raw_str("12.5 USD GST")),
 		[125, 1, "GST", "USD"], "string: dec curr tax_code");
 	is(as_tax(raw_str("12.5")), undef, "bare decimal → undef");
+	is_deeply(as_tax(raw_list([raw_str("12.5"), raw_str("GST")])),
+		[125, 1, "GST", undef], "raw list [decimal, tax_code]");
+	is_deeply(as_tax(vof_list([vof_decimal("12.5"), vof_string("GST")])),
+		[125, 1, "GST", undef], "typed list [decimal, tax_code]");
+	is(as_tax(raw_list([raw_str("12.5")])), undef, "list size 1 → undef");
+	is_deeply(as_tax(vof_string("12.5 GST")),
+		[125, 1, "GST", undef], "typed string: dec tax_code");
+	is_deeply(as_tax(vof_string("12.5 USD GST")),
+		[125, 1, "GST", "USD"], "typed string: dec curr tax_code");
+	is(as_tax(vof_null()), undef, "null → undef");
 };
 
 # ===== as_quantity =====
@@ -234,6 +318,9 @@ subtest 'as_ip' => sub {
 	is(as_ip(raw_str("::1")), inet_pton(AF_INET6, "::1"),
 		"string → IPv6 bytes");
 	is(as_ip(raw_int(42)), undef, "int → undef");
+	is(as_ip(vof_data($bytes4)), $bytes4, "data → IPv4 bytes");
+	is(as_ip(vof_string("10.0.0.1")), inet_pton(AF_INET, "10.0.0.1"),
+		"typed string → IPv4 bytes");
 };
 
 # ===== as_subnet =====
@@ -246,6 +333,19 @@ subtest 'as_subnet' => sub {
 	is(length($r->[0]), 4, "IPv4 bytes");
 	is(as_subnet(raw_str("10.0.0.0/33")), undef, "prefix > 32 for IPv4");
 	is(as_subnet(raw_str("invalid")), undef, "bad string");
+	my $s2 = as_subnet(raw_list([raw_str("10.0.0.0"), raw_int(8)]));
+	is($s2->[0], $bytes4, "raw list IP");
+	is($s2->[1], 8, "raw list prefix");
+	my $s3 = as_subnet(vof_list([vof_ip($bytes4), vof_uint(8)]));
+	is($s3->[0], $bytes4, "typed list IP");
+	is($s3->[1], 8, "typed list prefix");
+	my $s4 = as_subnet(vof_string("192.168.0.0/16"));
+	is($s4->[1], 16, "typed string prefix len");
+	is(as_subnet(raw_list([raw_str("10.0.0.0")])), undef,
+		"raw list size 1 → undef");
+	is(as_subnet(vof_list([vof_ip($bytes4)])), undef,
+		"typed list size 1 → undef");
+	is(as_subnet(vof_null()), undef, "null → undef");
 };
 
 # ===== as_coords =====
@@ -255,6 +355,9 @@ subtest 'as_coords' => sub {
 	my $r = as_coords(raw_list([raw_int(45), raw_int(-73)]));
 	is_deeply($r, [45.0, -73.0], "raw list of ints → floats");
 	is(as_coords(raw_list([raw_int(1)])), undef, "wrong size");
+	is_deeply(as_coords(vof_list([vof_float(45.5), vof_float(-73.5)])),
+		[45.5, -73.5], "typed list of floats");
+	is(as_coords(vof_null()), undef, "null → undef");
 };
 
 # ===== as_strmap =====
@@ -271,6 +374,14 @@ subtest 'as_strmap' => sub {
 
 	# Odd-length list fails
 	is(as_strmap(raw_list([raw_str("a")]), \&as_int), undef, "odd list → undef");
+
+	# Typed list pairs
+	my $tl = vof_list([vof_string("x"), vof_int(10), vof_string("y"), vof_int(20)]);
+	$r = as_strmap($tl, \&as_int);
+	is_deeply($r, { x => 10, y => 20 }, "typed list pairs");
+
+	# Unhandled type
+	is(as_strmap(vof_int(42), \&as_int), undef, "int → undef");
 };
 
 # ===== as_uintmap =====
@@ -284,6 +395,14 @@ subtest 'as_uintmap' => sub {
 	my $raw = raw_list([raw_int(5), raw_str("five"), raw_int(10), raw_str("ten")]);
 	$r = as_uintmap($raw, \&as_string);
 	is_deeply($r, { 5 => "five", 10 => "ten" }, "raw list pairs");
+
+	# Typed list pairs
+	my $tl = vof_list([vof_int(5), vof_string("five"), vof_int(10), vof_string("ten")]);
+	$r = as_uintmap($tl, \&as_string);
+	is_deeply($r, { 5 => "five", 10 => "ten" }, "typed list pairs");
+
+	# Unhandled type
+	is(as_uintmap(vof_int(42), \&as_string), undef, "int → undef");
 };
 
 # ===== as_list =====
@@ -298,6 +417,9 @@ subtest 'as_list' => sub {
 	# Reader failure propagates
 	my $bad = raw_list([raw_int(1), raw_str("abc")]);
 	is(as_list($bad, \&as_int), undef, "reader failure → undef");
+
+	# Unhandled type
+	is(as_list(vof_int(42), \&as_int), undef, "int → undef");
 };
 
 # ===== as_ndarray =====
@@ -316,6 +438,18 @@ subtest 'as_ndarray' => sub {
 	$r = as_ndarray($raw, \&as_int);
 	is_deeply($r->[0], [2, 2], "raw shape");
 	is_deeply($r->[1], [1, 2, 3, 4], "raw values");
+
+	# Typed list
+	my $tl = vof_list([
+		vof_list([vof_int(2), vof_int(2)]),
+		vof_int(10), vof_int(20), vof_int(30), vof_int(40),
+	]);
+	$r = as_ndarray($tl, \&as_int);
+	is_deeply($r->[0], [2, 2], "typed list shape");
+	is_deeply($r->[1], [10, 20, 30, 40], "typed list values");
+
+	# Unhandled type
+	is(as_ndarray(vof_int(42), \&as_int), undef, "int → undef");
 };
 
 # ===== as_variant =====
@@ -357,9 +491,58 @@ subtest 'as_variant' => sub {
 	is($got->[0], "Shipped", "list variant name");
 	is(scalar @{$got->[1]}, 1, "list variant args");
 
+	# List with integer ID (raw_int) as first element → _resolve_variant_id
+	as_variant($ctx, $schema, raw_list([raw_int(0), raw_int(99)]), sub {
+		$got = [$_[0], $_[1]]; return 1
+	});
+	is($got->[0], "Draft", "list with raw_int ID → symbol lookup");
+	is(scalar @{$got->[1]}, 1, "list with raw_int ID args");
+
+	# List with typed int ID → _resolve_variant_id VOF_INT path
+	as_variant($ctx, $schema, raw_list([vof_int(1), raw_str("x")]), sub {
+		$got = [$_[0], $_[1]]; return 1
+	});
+	is($got->[0], "Confirmed", "list with vof_int ID → symbol lookup");
+
+	# List with typed uint ID → _resolve_variant_id VOF_UINT path
+	as_variant($ctx, $schema, raw_list([vof_uint(2)]), sub {
+		$got = [$_[0], $_[1]]; return 1
+	});
+	is($got->[0], "Shipped", "list with vof_uint ID → symbol lookup");
+
+	# List with vof_string ID → _resolve_variant_id VOF_STRING path
+	as_variant($ctx, $schema, raw_list([vof_string("Delivered")]), sub {
+		$got = [$_[0], $_[1]]; return 1
+	});
+	is($got->[0], "Delivered", "list with vof_string ID");
+
+	# Typed list (VOF_LIST) variant
+	as_variant($ctx, $schema,
+		vof_list([vof_string("Draft"), vof_int(7)]), sub {
+		$got = [$_[0], $_[1]]; return 1
+	});
+	is($got->[0], "Draft", "typed list variant name");
+	is(scalar @{$got->[1]}, 1, "typed list variant args");
+
+	# Typed VOF_INT → bare integer symbol lookup
+	as_variant($ctx, $schema, vof_int(0), sub {
+		$got = $_[0]; return 1
+	});
+	is($got, "Draft", "typed vof_int(0) → Draft");
+
+	# Typed VOF_UINT → bare integer symbol lookup
+	as_variant($ctx, $schema, vof_uint(1), sub {
+		$got = $_[0]; return 1
+	});
+	is($got, "Confirmed", "typed vof_uint(1) → Confirmed");
+
 	# Unknown int
 	my $r = as_variant($ctx, $schema, raw_int(999), sub { return 1 });
 	is($r, undef, "unknown int → undef");
+
+	# Unhandled type → final return undef
+	$r = as_variant($ctx, $schema, vof_float(1.5), sub { return 1 });
+	is($r, undef, "float → undef (unhandled type)");
 };
 
 # ===== as_record =====
@@ -399,6 +582,10 @@ subtest 'as_record' => sub {
 	# Odd-length list fails
 	$r = as_record($ctx, $schema, raw_list([raw_str("id")]), sub { return {} });
 	is($r, undef, "odd list → undef");
+
+	# Unhandled type → final return undef
+	$r = as_record($ctx, $schema, vof_string("hi"), sub { return {} });
+	is($r, undef, "string → undef (unhandled type)");
 };
 
 # ===== as_series =====
@@ -438,6 +625,10 @@ subtest 'as_series' => sub {
 	# Empty series
 	$r = as_series($ctx, $schema, raw_list([]), sub { die "should not be called" });
 	is_deeply($r, [], "empty series → []");
+
+	# Unhandled type → final return undef
+	$r = as_series($ctx, $schema, vof_string("hi"), sub { return {} });
+	is($r, undef, "string → undef (unhandled type)");
 };
 
 done_testing;

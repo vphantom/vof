@@ -26,7 +26,20 @@ subtest 'int' => sub {
 subtest 'int safe range' => sub {
 	# Integers outside JS safe range become strings
 	my $big = 9_007_199_254_740_992;  # MAX_SAFE_INTEGER + 1
-	is(VOF::JSON::encode(vof_int($big)), "$big", "large int → string");
+	is(VOF::JSON::encode(vof_int($big)), "$big", "large positive int → string");
+
+	my $small = -9_007_199_254_740_992;  # MIN_SAFE_INTEGER - 1
+	is(VOF::JSON::encode(vof_int($small)), "$small", "large negative int → string");
+};
+
+subtest 'raw_tint encode' => sub {
+	my $raw = VOF::Value->new(VOF_RAW_TINT, 77);
+	is(VOF::JSON::encode($raw), 77, "RAW_TINT encodes as number");
+};
+
+subtest 'raw_tstr encode' => sub {
+	my $raw = VOF::Value->new(VOF_RAW_TSTR, "hello");
+	is(VOF::JSON::encode($raw), "hello", "RAW_TSTR encodes as string");
 };
 
 subtest 'uint' => sub {
@@ -142,7 +155,18 @@ subtest 'ip' => sub {
 
 subtest 'subnet' => sub {
 	my $bytes4 = inet_pton(AF_INET, "10.0.0.0");
-	is(VOF::JSON::encode(vof_subnet($bytes4, 8)), "10.0.0.0/8", "CIDR");
+	is(VOF::JSON::encode(vof_subnet($bytes4, 8)), "10.0.0.0/8", "CIDR IPv4");
+
+	my $bytes6 = inet_pton(AF_INET6, "2001:db8::");
+	my $e = VOF::JSON::encode(vof_subnet($bytes6, 32));
+	is($e, "2001:db8::/32", "CIDR IPv6");
+};
+
+subtest 'ip invalid length croaks' => sub {
+	# Bypass vof_ip validation by building a VOF::Value directly
+	my $bad = VOF::Value->new(VOF_IP, "ab");  # 2 bytes, neither 4 nor 16
+	eval { VOF::JSON::encode($bad) };
+	like($@, qr/invalid IP address/, "bad IP length croaks");
 };
 
 subtest 'coords' => sub {
@@ -235,6 +259,54 @@ subtest 'empty series' => sub {
 	my $s = $ctx->schema("thing", keys => ["id"], required => []);
 	my $e = VOF::JSON::encode(vof_series($s, []));
 	is_deeply($e, [], "empty series → []");
+};
+
+subtest 'series with sparse records and unknown fields' => sub {
+	my $ctx = VOF::Context->new("test");
+	$ctx->load("t/data/test_symbols.txt");
+	my $s = $ctx->schema("order.line");
+
+	# "zzz" and "aaa" are not in the symbol table → both get 1e9 sort key
+	# → spaceship returns 0, sort falls back to cmp ("aaa" before "zzz")
+	# Second record lacks "aaa" → _series_row substitutes null
+	my $e = VOF::JSON::encode(vof_series($s, [
+		{ i => vof_int(1), aaa => vof_string("x"), zzz => vof_string("y") },
+		{ i => vof_int(2), zzz => vof_string("z") },
+	]), $ctx);
+
+	is(ref $e, "ARRAY", "series → array");
+	is(scalar @$e, 3, "header + 2 rows");
+	# Known field "i" (ID=0) sorts first, then unknown "aaa"/"zzz" by alpha
+	is($e->[0][0], "i", "first col: known field");
+	is($e->[0][1], "aaa", "second col: unknown aaa (alpha before zzz)");
+	is($e->[0][2], "zzz", "third col: unknown zzz");
+	# Row 2: missing "aaa" → null (undef in JSON)
+	is($e->[2][0], 2, "row 2 i");
+	is($e->[2][1], undef, "row 2 aaa → null (missing field)");
+	is($e->[2][2], "z", "row 2 zzz present");
+};
+
+subtest 'series without context (alphabetical sort)' => sub {
+	my $ctx = VOF::Context->new("test");
+	my $s = $ctx->schema("thing", keys => ["id"], required => []);
+
+	my $e = VOF::JSON::encode(vof_series($s, [
+		{ beta => vof_int(2), alpha => vof_int(1) },
+		{ beta => vof_int(4), alpha => vof_int(3) },
+	]));
+	is(ref $e, "ARRAY", "series → array");
+	is(scalar @$e, 3, "header + 2 rows");
+	# Without context, columns are sorted alphabetically
+	is_deeply($e->[0], ["alpha", "beta"], "header sorted alphabetically");
+	is($e->[1][0], 1, "row 1 alpha");
+	is($e->[1][1], 2, "row 1 beta");
+};
+
+subtest 'encode non-VOF croaks' => sub {
+	eval { VOF::JSON::encode("not a VOF::Value") };
+	like($@, qr/VOF::Value required/, "bare string croaks");
+	eval { VOF::JSON::encode(undef) };
+	like($@, qr/VOF::Value required/, "undef croaks");
 };
 
 subtest 'encode raw types croaks' => sub {

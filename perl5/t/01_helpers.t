@@ -35,6 +35,7 @@ subtest 'decimal_of_string invalid' => sub {
 	is(decimal_of_string(""), undef, "empty string");
 	is(decimal_of_string("abc"), undef, "non-numeric");
 	is(decimal_of_string("."), undef, "bare dot");
+	is(decimal_of_string("-"), undef, "bare minus sign");
 };
 
 # ===== decimal_to_string =====

@@ -24,6 +24,14 @@ subtest 'singletons' => sub {
 	is(vof_bool(undef), $f, "undef → false singleton");
 };
 
+# ===== type accessor =====
+
+subtest 'type accessor' => sub {
+	is(vof_null()->type, VOF_NULL, "null type via accessor");
+	is(vof_int(1)->type, VOF_INT, "int type via accessor");
+	is(vof_string("x")->type, VOF_STRING, "string type via accessor");
+};
+
 # ===== Scalar constructors =====
 
 subtest 'vof_int' => sub {

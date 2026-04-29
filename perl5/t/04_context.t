@@ -19,6 +19,21 @@ subtest 'load symbol table' => sub {
 	is($ret, $ctx, "load returns self for chaining");
 };
 
+subtest 'load with foreign namespace warns' => sub {
+	my $ctx = VOF::Context->new("test");
+	my @warnings;
+	local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+	$ctx->load("t/data/test_foreign_ns.txt");
+	is(scalar @warnings, 1, "one warning about foreign namespace");
+	like($warnings[0], qr/skipping namespace.*other\.foreign/,
+		"warns about foreign ns");
+	# Valid namespaces still loaded
+	is($ctx->sym_by_id("test.valid", 0), "alpha", "valid ns loaded");
+	is($ctx->sym_by_id("test.also_valid", 0), "omega", "second valid ns loaded");
+	# Foreign namespace not loaded
+	is($ctx->sym_by_id("other.foreign", 0), undef, "foreign ns not loaded");
+};
+
 subtest 'load bad file' => sub {
 	my $ctx = VOF::Context->new("test");
 	eval { $ctx->load("t/data/nonexistent.vof") };

@@ -1,0 +1,11 @@
+# Test file with a namespace outside the root
+test.valid
+	alpha
+	beta
+
+other.foreign
+	gamma
+	delta
+
+test.also_valid
+	omega
