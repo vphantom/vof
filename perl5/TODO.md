@@ -8,7 +8,7 @@ Goals:
 * No server-side helpers (PATCH generation, `select~` processing)
 * Testing, since this will be used in production
 
-Relevant files from the OCaml implementation: `vof.ml`, `vof_lib.ml`, `vof_json.ml`
+Relevant files from the OCaml implementation: `vof.ml`, `vof_enc.ml`, `vof_lib.ml`, `vof_json.ml`
 
 ## Status
 

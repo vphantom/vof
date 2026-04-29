@@ -1,0 +1,20 @@
+# Test VOF Symbol Table
+
+test.order
+	id key
+	modified_at req
+	customer
+	lines
+	total
+
+test.order.line
+	i key
+	product
+	qty
+	unit_price
+
+test.status
+	Draft
+	Confirmed
+	Shipped
+	Delivered

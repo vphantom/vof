@@ -1,0 +1,15 @@
+Changes
+lib/VOF.pm
+lib/VOF/JSON.pm
+Makefile.PL
+MANIFEST
+README.md
+t/00_load.t
+t/01_helpers.t
+t/02_constructors.t
+t/03_readers.t
+t/04_context.t
+t/05_json_decode.t
+t/06_json_encode.t
+t/07_roundtrip.t
+t/data/test_symbols.txt

@@ -1,0 +1,14 @@
+/Makefile
+/MYMETA.*
+/META.*
+/blib/
+/pm_to_blib
+/cover_db/
+/nytprof.out
+/_build/
+/.build/
+*.bak
+*.old
+*.o
+*.bs
+*~

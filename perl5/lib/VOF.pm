@@ -560,12 +560,13 @@ sub decimal_to_string {
 	return "$sig" if $places == 0;
 
 	my $scale = 10 ** $places;
-	my $i     = int($sig / $scale);
-	my $f     = abs($sig % $scale);
+	my $abs   = abs($sig);
+	my $i     = int($abs / $scale);
+	my $f     = $abs % $scale;
 
-	return "$i" if $f == 0;
+	my $prefix = $sig < 0 ? ($i == 0 ? '-0' : "-$i") : "$i";
+	return $prefix if $f == 0;
 
-	my $prefix = ($sig < 0 && $i == 0) ? '-0' : "$i";
 	my $s = sprintf('%s.%0*d', $prefix, $places, $f);
 	$s =~ s/0+\z//;
 	return $s;
@@ -1651,8 +1652,6 @@ sub as_timespan {
 	return undef;
 }
 
-=back
-
 # Internal: shared parser for amount and quantity (decimal + optional qualifier)
 sub _as_decimal_qual {
 	my ($v) = @_;
@@ -1688,6 +1687,8 @@ sub _as_decimal_qual {
 	my $d = as_decimal($v);
 	return defined $d ? [$d->[0], $d->[1], undef] : undef;
 }
+
+=back
 
 =head2 Qualified Decimal Readers
 
