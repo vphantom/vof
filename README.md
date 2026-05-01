@@ -51,7 +51,7 @@ Release Candidate 14 - 2026-04-20
 
 ## SPECIFICATIONS
 
-* [JSON-Only Types & APIs](JSON_APIs.md)
+* [JSON-Only Types & APIs](JSON_APIs.md) (subset of the full spec)
 * [Full Types & APIs](SPECIFICATION.md)
 * [VOF Binary Encoding](BINARY.md)
 
