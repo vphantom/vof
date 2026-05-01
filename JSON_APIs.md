@@ -1,4 +1,4 @@
-# Vanilla Object Format
+# VOF Specification
 
 ## Data Types
 
@@ -9,11 +9,11 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `null`            | Null                                                          |
 | `bool`            | Boolean                                                       |
 | `list`            | Array                                                         |
-| `intmap`          | Object                                                        |
+| `uintmap`         | Object                                                        |
 | `strmap`          | Object                                                        |
 | `variant`/`enum`  | Array[String,values…] / String                                |
 | `record`          | Object (keys: names)                                          |
-| `series`          | 2D Array (row 0: names)                                       |
+| `series`          | 2D Array (row 0: names) / Empty Array                         |
 | `string`          | String (necessarily UTF-8)                                    |
 | `bytes`/`data`    | String base-64 URL encoded                                    |
 | `uint`            | Number / String if outside MIN/MAX for float64                |
@@ -63,7 +63,9 @@ Variant, Enum and Record types need unique namespaces in singular form, for exam
 
 ### Series
 
-Compact representation of a list of `record` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON, this is a 2-D Array where the first row selects fields by name and each subsequent row is an Array with just those values.
+Compact representation of a list of `record` where all the same fields are defined (typical of time series data, product price lists, etc.)  In JSON and CBOR, this is a 2-D Array where the first row selects fields by name (by ID in CBOR) and each subsequent row is an Array with just those values.  If numeric field IDs are available, that order should be used instead of alphanumeric, to make field order vary the least over time.
+
+Any field missing from a record is encoded as `Null`.  An empty series must be encoded with a singular empty Array (i.e. `[]` not `[[]]`).
 
 ### Decimal
 
@@ -75,7 +77,7 @@ Calendar date, sortable.  Time zone is outside the scope of this type, derived f
 
 ### Datetime
 
-Extends `date` with wall clock time, still sortable and with implicit time zone.  In JSON, a human-friendly `YYYYMMDDHHMM` number is used to avoid using stings.
+Extends `date` with wall clock time with minute precision, still sortable and with implicit time zone.  In JSON, a human-friendly `YYYYMMDDHHMM` number is used to avoid using stings.
 
 ### Timespan
 
@@ -250,7 +252,11 @@ Every HTTP response is a `$msg` record, which consists of a few meta-data fields
 
 ## Implementation Considerations
 
+### Maps
+
+Decoders should use the last value when a key is present multiple times.
+
 ### Series
 
-Encoders should use the first record of the list to determine the structure of all records in the list.  They should fail if a subsequent member has extra fields set.  If subsequent members are missing any fields though, encoders should encode `Null` for them in order to keep going.
+Encoders can either pre-scan the full series to collect the possible record fields, which is convenient but breaks streaming ability, or rely on the first record's fields and fail if any subsequent record includes extra fields when streaming is needed.  This is considered an implementation detail.
 
