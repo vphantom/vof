@@ -220,8 +220,20 @@ module Reader = struct
   ;;
 
   let string = function
-    | Raw_tstr s | Raw_bstr s | String s -> Some s
+    | Raw_tstr s
+    | Raw_bstr s
+    | String s
+    | Code s
+    | Language s
+    | Country s
+    | Subdivision s
+    | Currency s
+    | Tax_code s
+    | Unit s -> Some s
     | Raw_tint n | Raw_bint n | Int n | Uint n -> Some (Int.to_string n)
+    | Float f -> Some (Float.to_string f)
+    | Decimal d -> Some (Decimal.to_string d)
+    | Ratio r -> Some (Ratio.to_string r)
     | _ -> None
   ;;
 
@@ -234,7 +246,12 @@ module Reader = struct
   let unit_ = string
 
   let data = function
-    | Raw_tstr s | Raw_bstr s | String s -> Some (Bytes.of_string s)
+    | Raw_tstr s -> (
+      match Base64.(decode_exn ~pad:false ~alphabet:uri_safe_alphabet s) with
+      | d -> Some (Bytes.of_string d)
+      | exception _ -> None
+    )
+    | Raw_bstr s | String s -> Some (Bytes.of_string s)
     | Data d -> Some d
     | _ -> None
   ;;
@@ -381,7 +398,7 @@ module Reader = struct
     | Raw_tstr s | Raw_bstr s | String s -> (
       match String.split_on_char ' ' s with
       | [ ds; ts ] -> Decimal.of_string ds |> Option.map (fun d -> d, ts, None)
-      | [ ds; ts; cs ] ->
+      | [ ds; cs; ts ] ->
         Decimal.of_string ds |> Option.map (fun d -> d, ts, Some cs)
       | _ -> None
     )
@@ -493,6 +510,7 @@ module Reader = struct
       match v with
       | Raw_bint n | Raw_tint n | Raw_int n | Int n | Uint n ->
         Context.idx_sym idx n
+      | Raw_tstr s | Raw_bstr s | String s -> Some s
       | _ -> None
     in
     match v with
