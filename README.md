@@ -46,8 +46,8 @@ Release Candidate 14 - 2026-04-20
 
 ## ROADMAP
 
-- [ ] Test round-trips to try to catch fatal design issues
 - [ ] Create data files to help test all implementations
+- [ ] OCaml tests for 80% coverage
 
 ## SPECIFICATIONS
 
@@ -59,6 +59,16 @@ Release Candidate 14 - 2026-04-20
 
 * [OCaml](ocaml/README.md) (JSON/CBOR/Binary, API server utils)
 * [Perl 5](perl5/TODO.md) (JSON client only)
+* [C#](csharp/TODO.md) (planned)
+* [JavaScript](javascript/TODO.md) (planned)
+* [PHP 8](php/TODO.md) (planned)
+* [Python 3](python3/TODO.md) (planned)
+* Java 17 (being considered)
+* Go 1.18 (being considered)
+* Swift (being considered)
+* F# (if there is demand)
+* Ruby (if there is demand)
+* Rust (if there is demand)
 
 ## ACKNOWLEDGEMENTS
 
