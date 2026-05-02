@@ -72,14 +72,14 @@ let write_array_head buf l =
 ;;
 
 let write_array_open buf l =
-  if l < 0 then assert false;
+  if l < 0 then invalid_arg "Vof_cbor.write_array_open: negative length";
   if l < 24 then write_head buf 4 l else add_byte buf 0x9F
 ;;
 
 let write_array_close buf l = if l >= 24 then add_byte buf 0xFF
 
 let write_map_open buf l =
-  if l < 0 then assert false;
+  if l < 0 then invalid_arg "Vof_cbor.write_map_open: negative length";
   if l < 24 then write_head buf 5 l else add_byte buf 0xBF
 ;;
 

@@ -31,7 +31,7 @@ module Decimal = struct
     | 1 -> optimize (value, 2)
     | 2 -> optimize (value, 4)
     | 3 -> optimize (value, 9)
-    | _ -> assert false
+    | _ -> failwith "Vof.Decimal.unpack: impossible"
   ;;
 
   let to_n (value, dec) =
@@ -100,7 +100,7 @@ module Decimal = struct
     | 7 -> build 10000000
     | 8 -> build 100000000
     | 9 -> build 1000000000
-    | _ -> invalid_arg "decimals must be 0..9"
+    | _ -> invalid_arg "Decimal.to_string: unsupported decimal places"
   ;;
 end
 

@@ -6,7 +6,7 @@
 
 ## Coding Style
 
-- Design principles: KISS, YAGNI, DRY, Fail Fast
+- Design principles: KISS, YAGNI, DRY, Fail Fast, Postel's law
 - Naming conventions:
   - The more local the scope, the shorter the symbols (i.e. single-letter variable names inside a 5-line function)
   - The more global the scope, the more obvious the symbols (i.e. a full verb-noun combo for a public API method)

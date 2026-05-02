@@ -37,6 +37,22 @@ As of this version, the final encoding and decoding is left to the caller and th
   - `Seq.t` to `List.t` as an intermediary for conversions to reduce allocations
 - Naming conventions:
   - Converters with `of_X`/`to_X` pairs
-- Dependencies: Stdlib plus as few specific helpers as possible
-- Error handling:
-  - Reserve exceptions for fatal errors (i.e. OOM), developer errors which should never make it to production (i.e. `invalid_arg` on array index out of bounds or `assert false` on unacceptable match case) and `raise_notrace` for I/O signaling (i.e. EOF) and for early returns in hot paths.  Use the result and option types when other conditions are possible.
+
+### Errors, Flow Control
+
+#### Development Errors
+
+Errors which should never happen in production deserve full stack traces.
+
+* `assert` — _avoid_, use `failwith "…"` or `if expr then failwith "…"`
+* `failwith "…"` — theoretically impossible states like negative array positions
+* `invalid_arg "Module.func: …"` — caller misuse (developer error) with helpful hint
+* `raise A_custom_exception` — non-developer errors which should still not happen in production
+
+#### Exceptions For Flow Control
+
+For hot-path flow control where bubbling a result value is impractical, use `raise_notrace`.  Use Stdlib's `End_of_file`, `Exit` and `Not_found` where appropriate, create custom exceptions for anything else.  Use custom exceptions instead of `Exit` for internal flow control which should not leak to your caller, for disambiguation.
+
+#### Return Values
+
+When it is expected that a function may not return its normal result in production, use `option`.  When there is useful information to pass along in the error case, use `result` instead.

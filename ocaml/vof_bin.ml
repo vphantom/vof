@@ -84,7 +84,7 @@ let write_gap buf n =
 ;;
 
 let write_list_open buf n =
-  if n < 0 then assert false;
+  if n < 0 then invalid_arg "Vof_bin.write_list_open: negative length";
   if n <= 11 then add_byte buf (232 + n) else add_byte buf 250
 ;;
 

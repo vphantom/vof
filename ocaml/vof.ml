@@ -120,7 +120,7 @@ module Context = struct
 
   let idx_id ctx idx s =
     match ctx.update, StringMap.find_opt s idx.sym_ids with
-    | false, None -> assert false
+    | false, None -> invalid_arg ("Vof.Context.idx_id: unknown symbol " ^ s)
     | true, None ->
       let id = Array.length idx.id_syms in
       idx.id_syms <- Array.append idx.id_syms [| s |];
@@ -201,7 +201,7 @@ module Context = struct
   ;;
 
   let add ctx path =
-    if not ctx.update then assert false;
+    if not ctx.update then invalid_arg "Vof.Context.add: not in update mode";
     let idx = idx_make () in
     ctx.registry <- StringMap.add path idx ctx.registry;
     idx
@@ -854,10 +854,10 @@ and diff_record_list old_list new_list =
   let schema =
     match old_list @ new_list with
     | (s, _) :: _ -> s
-    | _ -> assert false
+    | _ -> failwith "Vof.diff_record_list: empty list"
   in
   let keys = schema.keys in
-  if keys = [] then invalid_arg "diff_record_list: schema without keys";
+  if keys = [] then invalid_arg "Vof.diff_record_list: schema without keys";
   let key_of sm = List.map (fun k -> StringMap.find k sm) keys in
   let restrict_to_keys sm =
     List.fold_left

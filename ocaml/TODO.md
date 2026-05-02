@@ -3,7 +3,6 @@
 ### Other Tasks
 
 - [ ] Re-create lost `vof.mli`
-- [ ] Implement symbol table file I/O
 - [ ] Helper to detect which wire format we're reading (JSON, CBOR, Binary, Gzip, Zstd)
 - [ ] `select` and `build_msg` API helpers
 - [ ] See what other kind of API helpers we could add.  Any boilerplate we can help reduce (as we did with Reader).
