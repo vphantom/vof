@@ -58,7 +58,8 @@ let rec of_vof ctx = function
   | Percent (v, d) -> `String (Decimal.to_string (v * 100, d) ^ "%")
   | Date d -> `Int (Date.to_human (d.year, d.month, d.day))
   | Datetime dt -> of_datetime dt
-  | Timespan (a, b, c) -> `List [ `Int a; `Int b; `Int c ]
+  | Timespan { hmonths; days; secs } ->
+    `List [ `Int hmonths; `Int days; `Int secs ]
   | Code s
   | Language s
   | Country s

@@ -246,8 +246,11 @@ let rec encode_val ctx buf = function
     write_uint buf dt.day;
     write_uint buf dt.hour;
     write_uint buf dt.minute
-  | Timespan (a, b, c) ->
-    write_array_head buf 3; write_int buf a; write_int buf b; write_int buf c
+  | Timespan { hmonths; days; secs } ->
+    write_array_head buf 3;
+    write_int buf hmonths;
+    write_int buf days;
+    write_int buf secs
   | Code s
   | Language s
   | Country s

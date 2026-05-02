@@ -30,6 +30,7 @@ type decimal = int * int
 type ratio = int * int
 type date = { year: int; month: int; day: int }
 type datetime = { year: int; month: int; day: int; hour: int; minute: int }
+type timespan = { hmonths: int; days: int; secs: int }
 
 type t =
   | Null
@@ -47,7 +48,7 @@ type t =
   | Timestamp of int
   | Date of date
   | Datetime of datetime
-  | Timespan of int * int * int
+  | Timespan of timespan
   | Code of string
   | Language of string
   | Country of string
@@ -494,7 +495,7 @@ module Reader = struct
   ;;
 
   let timespan = function
-    | Timespan (a, b, c) -> Some (a, b, c)
+    | Timespan { hmonths; days; secs } -> Some (hmonths, days, secs)
     | Raw_blist [ a; b; c ]
     | Raw_tlist [ a; b; c ]
     | Raw_list [ a; b; c ]

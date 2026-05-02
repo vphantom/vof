@@ -140,11 +140,11 @@ let rec encode_val ctx buf = function
   | Datetime dt ->
     Datetime.pack (dt.year, dt.month, dt.day, dt.hour, dt.minute)
     |> write_uint buf
-  | Timespan (a, b, c) ->
+  | Timespan { hmonths; days; secs } ->
     write_list_open buf 3;
-    write_sint buf a;
-    write_sint buf b;
-    write_sint buf c;
+    write_sint buf hmonths;
+    write_sint buf days;
+    write_sint buf secs;
     write_list_close buf 3
   | String s
   | Raw_bstr s
