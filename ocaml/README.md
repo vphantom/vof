@@ -20,7 +20,3 @@ As of this version, the final encoding and decoding is left to the caller and th
 * We use native `int` integers, which means that we cannot I/O full 64-bit.  Good compromise for business applications, not for things like IPv4 or truncated UUID values.
 * There is no `Reader.enum` helper, since in OCaml those are variants anyway.  Instead, `Reader.variant` accepts enums gracefully.
 * We use options for error management, since it's impractical to refer to locations of errors in source data.
-
-## Known Limitations
-
-* Binary I/O is not yet implemented

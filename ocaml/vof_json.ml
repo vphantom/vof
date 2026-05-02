@@ -78,12 +78,12 @@ let rec of_vof ctx = function
   | Ip ip -> (
     match Bytes.unsafe_to_string ip |> Ipaddr.of_octets with
     | Ok addr -> `String (Ipaddr.to_string addr)
-    | Error _ -> invalid_arg "vof_json: of_vof: invalid IP address"
+    | Error _ -> invalid_arg "Vof_json.of_vof: invalid IP address"
   )
   | Subnet (ip, len) -> (
     match Bytes.unsafe_to_string ip |> Ipaddr.of_octets with
     | Ok addr -> `String (Ipaddr.to_string addr ^ "/" ^ Int.to_string len)
-    | Error _ -> invalid_arg "vof_json: of_vof: invalid IP address"
+    | Error _ -> invalid_arg "Vof_json.of_vof: invalid IP address"
   )
   | Coords (a, b) -> `List [ `Float a; `Float b ]
   | Strmap sm | Record (_, sm) ->
@@ -106,5 +106,5 @@ let rec of_vof ctx = function
     let header = `List (List.map (fun (k, _) -> `String k) fields) in
     let row (_, sm) = `List (List.map (of_vof ctx) (series_row fields sm)) in
     `List (header :: List.map row rl)
-  | _ -> invalid_arg "vof_json: of_vof: raw types cannot be converted"
+  | _ -> invalid_arg "Vof_json.of_vof: raw types cannot be converted"
 ;;

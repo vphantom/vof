@@ -3,13 +3,12 @@ module StringSet = Set.Make (String)
 module StringMap = Map.Make (String)
 module IntMap = Map.Make (Int)
 
+let ( let- ) v f = Option.iter f v
 let ( let| ) = Option.bind
 
 exception Vof_return
 
 type schema = { path: string; keys: string list; required: string list }
-
-let make_schema ?(keys = []) ?(required = []) path = { path; keys; required }
 
 let both_opt = function
   | Some a, Some b -> Some (a, b)
@@ -86,11 +85,16 @@ module Context = struct
   type index = {
     mutable sym_ids: int StringMap.t;
     mutable id_syms: string array;
+    mutable qualifiers: StringSet.t StringMap.t;
+    mutable ns_qualifiers: StringSet.t;
+    mutable keys: string list;
+    mutable required: string list;
   }
 
   type t = {
     update: bool;
     mutable modified: bool;
+    mutable file: string option;
     root: string;
     mutable registry: index StringMap.t;
     mutable fetchers: (record -> record option) StringMap.t;
@@ -103,7 +107,16 @@ module Context = struct
     ctx.fetchers <- List.fold_left add ctx.fetchers fl
   ;;
 
-  let idx_make () = { sym_ids = StringMap.empty; id_syms = [||] }
+  let idx_make () =
+    {
+      sym_ids = StringMap.empty;
+      id_syms = [||];
+      qualifiers = StringMap.empty;
+      ns_qualifiers = StringSet.empty;
+      keys = [];
+      required = [];
+    }
+  ;;
 
   let idx_id ctx idx s =
     match ctx.update, StringMap.find_opt s idx.sym_ids with
@@ -112,6 +125,7 @@ module Context = struct
       let id = Array.length idx.id_syms in
       idx.id_syms <- Array.append idx.id_syms [| s |];
       idx.sym_ids <- StringMap.add s id idx.sym_ids;
+      ctx.modified <- true;
       id
     | _, Some id -> id
   ;;
@@ -122,10 +136,64 @@ module Context = struct
     else Some (Array.unsafe_get idx.id_syms id)
   ;;
 
+  let schema ctx ?keys ?required rel_path =
+    let path = ctx.root ^ "." ^ rel_path in
+    let validate_ctx idx ks rs =
+      let sort = List.sort String.compare in
+      if sort idx.keys <> sort ks
+      then invalid_arg ("Vof.Context.schema: keys mismatch for " ^ path);
+      if sort idx.required <> sort rs
+      then invalid_arg ("Vof.Context.schema: required mismatch for " ^ path)
+    in
+    let update_ctx idx ks rs =
+      let update_qual sym qual_str should_have =
+        let _ = idx_id ctx idx sym in
+        let update = if should_have then StringSet.add else StringSet.remove in
+        let quals =
+          StringMap.find_opt sym idx.qualifiers
+          |> Option.value ~default:StringSet.empty
+          |> update qual_str
+          |> fun qs -> StringMap.add sym qs idx.qualifiers
+        in
+        idx.qualifiers <- quals
+      in
+      if idx.keys <> ks || idx.required <> rs
+      then (
+        List.iter (fun s -> update_qual s "key" false) idx.keys;
+        List.iter (fun s -> update_qual s "key" true) ks;
+        List.iter (fun s -> update_qual s "req" false) idx.required;
+        List.iter (fun s -> update_qual s "req" true) rs;
+        idx.keys <- ks;
+        idx.required <- rs;
+        ctx.modified <- true
+      )
+    in
+    let idx_opt = StringMap.find_opt path ctx.registry in
+    let have_hints = keys <> None || required <> None in
+    match idx_opt, have_hints with
+    | None, false ->
+      invalid_arg ("Vof.Context.schema: unknown namespace " ^ path)
+    | Some idx, false -> { path; keys = idx.keys; required = idx.required }
+    | None, true ->
+      let idx = idx_make () in
+      let ks = Option.value ~default:[] keys in
+      let rs = Option.value ~default:[] required in
+      idx.keys <- ks;
+      idx.required <- rs;
+      ctx.registry <- StringMap.add path idx ctx.registry;
+      { path; keys = ks; required = rs }
+    | Some idx, true ->
+      let ks = Option.value ~default:idx.keys keys in
+      let rs = Option.value ~default:idx.required required in
+      if ctx.update then update_ctx idx ks rs else validate_ctx idx ks rs;
+      { path; keys = ks; required = rs }
+  ;;
+
   let make ?(update = false) root =
     {
       update;
       modified = false;
+      file = None;
       root;
       registry = StringMap.empty;
       fetchers = StringMap.empty;
@@ -150,16 +218,100 @@ module Context = struct
     idx_id ctx idx s
   ;;
 
-  (* Remember to strip the root and '.' from each namespace. *)
-  let load ?(update = false) root path =
-    ignore (update, root, path);
-    failwith "unimplemented"
+  let lookup_create ctx path =
+    match StringMap.find_opt path ctx.registry with
+    | Some idx -> idx
+    | None ->
+      let idx = idx_make () in
+      ctx.registry <- StringMap.add path idx ctx.registry;
+      idx
   ;;
 
-  (* Remember to prepend the root to each namespace. *)
+  (* Adapted from Stdlib.String.split_on_char with 2 collapsed separators. *)
+  let split_on_2chars c1 c2 s =
+    let r = ref [] in
+    let j = ref (String.length s) in
+    for i = String.length s - 1 downto 0 do
+      let c = String.unsafe_get s i in
+      if c = c1 || c = c2
+      then (
+        if !j - i - 1 > 0 then r := String.sub s (i + 1) (!j - i - 1) :: !r;
+        j := i
+      )
+    done;
+    String.sub s 0 !j :: !r
+  ;;
+
+  let load ctx path =
+    if not (StringMap.is_empty ctx.registry)
+    then invalid_arg "Vof.Context.load: registry must be empty";
+    ctx.file <- Some path;
+    let contents =
+      if ctx.update && not (Sys.file_exists path)
+      then ""
+      else In_channel.with_open_bin path In_channel.input_all
+    in
+    let prefix = ctx.root ^ "." in
+    let current_idx = ref None in
+    let each_line line =
+      match split_on_2chars '\t' ' ' line with
+      | [] | [ "" ] -> ()
+      | s :: _ when String.length s > 0 && s.[0] = '#' -> ()
+      | "" :: symbol :: quals ->
+        let- idx = !current_idx in
+        let id = StringMap.cardinal idx.sym_ids in
+        if StringMap.mem symbol idx.sym_ids
+        then invalid_arg "Vof.Context.load: duplicate symbol";
+        idx.sym_ids <- StringMap.add symbol id idx.sym_ids;
+        let qual_set = StringSet.of_list quals in
+        idx.qualifiers <- StringMap.add symbol qual_set idx.qualifiers;
+        if StringSet.mem "key" qual_set then idx.keys <- idx.keys @ [ symbol ];
+        if StringSet.mem "req" qual_set
+        then idx.required <- idx.required @ [ symbol ]
+      | path :: quals ->
+        if not (String.starts_with ~prefix path)
+        then invalid_arg ("Vof.Context.load: unexpected path " ^ path);
+        let idx = lookup_create ctx path in
+        idx.ns_qualifiers <- StringSet.of_list quals;
+        current_idx := Some idx
+    in
+    split_on_2chars '\r' '\n' contents |> List.iter each_line;
+    let each_idx _ idx =
+      let arr = Array.make (StringMap.cardinal idx.sym_ids) "" in
+      StringMap.iter (fun sym id -> arr.(id) <- sym) idx.sym_ids;
+      idx.id_syms <- arr
+    in
+    StringMap.iter each_idx ctx.registry
+  ;;
+
   let save ctx =
-    if not ctx.update then assert false;
-    if ctx.modified then failwith "unimplemented"
+    if not ctx.update then invalid_arg "Vof.Context.save: not in update mode";
+    match ctx.modified, ctx.file with
+    | false, _ -> ()
+    | true, None -> invalid_arg "Vof.Context.save: no file path set"
+    | true, Some path ->
+      let buf = Buffer.create 1024 in
+      Buffer.add_string buf "# VOF Symbol Table\n";
+      let each_ns ns_path idx =
+        Buffer.add_char buf '\n';
+        Buffer.add_string buf ns_path;
+        StringSet.iter
+          Buffer.(fun q -> add_char buf ' '; add_string buf q)
+          idx.ns_qualifiers;
+        Buffer.add_char buf '\n';
+        let each_sym sym =
+          Buffer.add_char buf '\t';
+          Buffer.add_string buf sym;
+          StringMap.find_opt sym idx.qualifiers
+          |> Option.value ~default:StringSet.empty
+          |> StringSet.iter Buffer.(fun q -> add_char buf ' '; add_string buf q);
+          Buffer.add_char buf '\n'
+        in
+        Array.iter each_sym idx.id_syms
+      in
+      StringMap.iter each_ns ctx.registry;
+      Out_channel.with_open_bin path (fun oc -> Buffer.output_buffer oc buf);
+      ctx.modified <- false
   ;;
 end
 

@@ -10,7 +10,7 @@ let[@inline] add_be64 buf n = Buffer.add_int64_be buf n
 let write_head buf major n =
   let m = major lsl 5 in
   match n with
-  | n when n < 0 -> invalid_arg "vof_cbor: write_head: negative argument"
+  | n when n < 0 -> invalid_arg "Vof_cbor.write_head: negative argument"
   | n when n <= 23 -> add_byte buf (m lor n)
   | n when n <= 0xFF ->
     add_byte buf (m lor 24);
@@ -39,7 +39,7 @@ let write_int buf i =
 ;;
 
 let write_uint buf i =
-  if i < 0 then invalid_arg "vof_cbor: write_uint: negative argument";
+  if i < 0 then invalid_arg "Vof_cbor.write_uint: negative argument";
   write_head buf 0 i
 ;;
 
@@ -67,7 +67,7 @@ let write_text buf s =
 ;;
 
 let write_array_head buf l =
-  if l < 0 || l > 23 then invalid_arg "vof_cbor: write_array_head: out of range";
+  if l < 0 || l > 23 then invalid_arg "Vof_cbor.write_array_head: out of range";
   write_head buf 4 l
 ;;
 
@@ -111,7 +111,7 @@ let write_uintmap f buf im =
 let decode ?(pos = 0) ?len src =
   let len = Option.value len ~default:(String.length src - pos) in
   if pos < 0 || len <= 0 || pos + len > String.length src
-  then invalid_arg "vof_cbor: decode: out of range";
+  then invalid_arg "Vof_cbor.decode: out of range";
   let limit = pos + len in
   let raw = Bytes.unsafe_of_string src in
   let p = ref pos in
@@ -318,7 +318,7 @@ let rec encode_val ctx buf = function
       write_array_close buf nf
     in
     List.iter write_record rl; write_array_close buf len
-  | _ -> invalid_arg "vof_cbor: encode_val: raw types cannot be converted"
+  | _ -> invalid_arg "Vof_cbor.encode_val: raw types cannot be converted"
 ;;
 
 let encode_buf ctx ?(magic = false) ?(buf = Buffer.create 256) v =
