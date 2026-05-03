@@ -273,7 +273,7 @@ Full example: `GET …/orders?user=12345&select~=id,ordered_on,grand_total,lines
 
 (Default: none.)  List of a record's fields (expected to be lists of records) to filter based on query filters.  For example, it could be desirable to restrict order lines in each returned order for a query filtering on order line product types.
 
-For example, `…/orders?prune~=lines&is_draft=$false&date=between:20250101:20251231&lines.product=in(ABC,DEF)` would return final orders placed in 2025 which have lines about products ABC or DEF, but each order would only include lines about products ABC or DEF.
+For example, `…/orders?prune~=lines&is_draft=$false&date=between:20250101:20251231&lines.product=in:ABC:DEF` would return final orders placed in 2025 which have lines about products ABC or DEF, but each order would only include lines about products ABC or DEF.
 
 <!-- /advanced -->
 
@@ -283,7 +283,7 @@ For example, `…/orders?prune~=lines&is_draft=$false&date=between:20250101:2025
 
 #### Row Filters
 
-* Format: `field[!]=[operator:]value[,value2…]`
+* Format: `field[!]=[operator:]value[:value2…]`
 * Appending '!' to a field name negates its operator, like `name!=has:Smith` selects all names which do _not_ include "Smith".
 * Filters are additive (all must be true).
 * Fields may be used more than once.

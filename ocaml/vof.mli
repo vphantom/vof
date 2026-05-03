@@ -223,8 +223,10 @@ module Reader : sig
 end
 
 (** [pp_ref r] returns a string representation of a record reference as
-    ["path(key1,key2...)"] with all fields (keys and required) or a full record
-    as ["path{key1,key2,...}"] with only keys and required fields. *)
+    ["path(key1,key2...;required1,required2,...)"] where key values are followed
+    by required values, both in the order in which they were declared in the
+    schema. A non-reference gets the same treatment, but adds a third section
+    ["; ..."] to indicate that it has additional fields. *)
 val pp_ref : record -> string
 
 (** [pp v] returns a string representation of basic types, ["?"] otherwise. Uses
@@ -257,10 +259,11 @@ val diff : t -> t -> t option
 
 (** {2 Warnings} *)
 
-type warning =
-  [ `Vof_malformed_select of string
-  | `Vof_malformed_filter of string
-  | `Vof_fetch_failed of string * string ]
+type warning = [
+  | `Vof_unknown_param of string
+  | `Vof_invalid_param of string * string
+  | `Vof_fetch_failed of string * string
+] [@@ocamlformat "disable"]
 
 (** Your list of warnings. Note that this module adds warnings to the head of
     this list, so it is chronologically reversed. *)
@@ -309,7 +312,6 @@ type query = {
   filters: filter list;
   max: int;
   page: int;
-  params: (string * string) list; (** Non-tilde, non-filter pairs *)
 }
 
 (** [make_query ?warn params] Create a query from a list of key-value pairs.

@@ -788,9 +788,87 @@ module Reader = struct
   ;;
 end
 
-let pp v = ignore v; failwith "unimplemented"
-let pp_ref v = ignore v; failwith "unimplemented"
-let is_ref r = ignore r; failwith "unimplemented"
+let is_ref (schema, sm) =
+  StringMap.for_all
+    (fun k _ -> List.mem k schema.keys || List.mem k schema.required)
+    sm
+;;
+
+let rec pp = function
+  | Null -> "NULL"
+  | Bool true -> "TRUE"
+  | Bool false -> "FALSE"
+  | Int n | Uint n | Timestamp n -> Int.to_string n
+  | Float f -> Float.to_string f
+  | String s -> Printf.sprintf "%S" s
+  | Code s
+  | Language s
+  | Country s
+  | Subdivision s
+  | Currency s
+  | Tax_code s
+  | Unit s -> s
+  | Decimal d -> Decimal.to_string d
+  | Ratio r -> Ratio.to_string r
+  | Percent (v, d) -> Decimal.to_string (v * 100, d) ^ "%"
+  | Date { year; month; day } -> Printf.sprintf "%04d-%02d-%02d" year month day
+  | Datetime { year; month; day; hour; minute } ->
+    Printf.sprintf "%04d-%02d-%02dT%02d:%02d" year month day hour minute
+  | Timespan { hmonths; days; secs } ->
+    Printf.sprintf "timespan[%d,%d,%d]" hmonths days secs
+  | Enum (_, s) -> s
+  | Variant (_, s, []) -> s
+  | Variant (_, s, args) ->
+    let a = List.map pp args |> String.concat "," in
+    Printf.sprintf "%s(%s)" s a
+  | Amount (d, None) -> Decimal.to_string d
+  | Amount (d, Some c) -> Printf.sprintf "%s%s" (Decimal.to_string d) c
+  | Tax (d, t, None) -> Printf.sprintf "%s%s" (Decimal.to_string d) t
+  | Tax (d, t, Some c) -> Printf.sprintf "%s%s%s" (Decimal.to_string d) c t
+  | Quantity (d, None) -> Decimal.to_string d
+  | Quantity (d, Some u) -> Printf.sprintf "%s%s" (Decimal.to_string d) u
+  | Coords (lat, lon) -> Printf.sprintf "(%g,%g)" lat lon
+  | Ip b -> (
+    let s = Bytes.to_string b in
+    match Ipaddr.of_octets s with
+    | Ok ip -> Ipaddr.to_string ip
+    | Error _ -> "?"
+  )
+  | Subnet (b, bits) -> (
+    let s = Bytes.to_string b in
+    match Ipaddr.of_octets s with
+    | Ok ip -> Printf.sprintf "%s/%d" (Ipaddr.to_string ip) bits
+    | Error _ -> "?"
+  )
+  | Record r -> pp_ref r
+  | _ -> "?"
+
+and pp_ref (schema, sm) =
+  let buf = Buffer.create 64 in
+  Buffer.add_string buf schema.path;
+  Buffer.add_char buf '(';
+  let add_values first fields =
+    List.fold_left
+      (fun first k ->
+        if not first then Buffer.add_char buf ',';
+        ( match StringMap.find_opt k sm with
+        | Some v -> Buffer.add_string buf (pp v)
+        | None -> Buffer.add_string buf "NULL"
+        );
+        false
+      )
+      first fields
+  in
+  let first = add_values true schema.keys in
+  if schema.required <> []
+  then (
+    Buffer.add_char buf ';';
+    ignore (add_values first schema.required)
+  );
+  if not (is_ref (schema, sm)) then Buffer.add_string buf ";...";
+  Buffer.add_char buf ')';
+  Buffer.contents buf
+;;
 
 let rec equal (a : t) (b : t) : bool =
   match a, b with
@@ -952,23 +1030,191 @@ type query = {
   filters: filter list;
   max: int;
   page: int;
-  params: (string * string) list;
 }
 
 type msg = record KeyMap.t StringMap.t
 
-type warning =
-  [ `Vof_malformed_select of string
-  | `Vof_malformed_filter of string
-  | `Vof_fetch_failed of string * string ]
+type warning = [
+  | `Vof_unknown_param of string
+  | `Vof_invalid_param of string * string
+  | `Vof_fetch_failed of string * string
+] [@@ocamlformat "disable"]
 
 type warnings = warning list ref
 
-let pp_warn w = ignore w; failwith "unimplemented"
+let pp_warn = function
+  | `Vof_invalid_param (f, v) -> Printf.sprintf "invalid parameter %s='%s'" f v
+  | `Vof_unknown_param s -> Printf.sprintf "unknown parameter: %s" s
+  | `Vof_fetch_failed (path, reason) ->
+    Printf.sprintf "fetch failed for %s: %s" path reason
+;;
+
+let rec parse_selection_str s =
+  let split_select s =
+    let tokens = ref [] in
+    let start = ref 0 in
+    let depth = ref 0 in
+    let len = String.length s in
+    for i = 0 to len - 1 do
+      match String.unsafe_get s i with
+      | '(' -> incr depth
+      | ')' ->
+        decr depth;
+        if !depth < 0 then raise_notrace Vof_return
+      | ',' when !depth = 0 ->
+        tokens := String.sub s !start (i - !start) :: !tokens;
+        start := i + 1
+      | _ -> ()
+    done;
+    if !depth <> 0 then raise_notrace Vof_return;
+    tokens := String.sub s !start (len - !start) :: !tokens;
+    Some (List.rev !tokens)
+  in
+  let parse_tokens tokens =
+    let star = ref false in
+    let excludes = ref StringSet.empty in
+    let includes = ref StringSet.empty in
+    let expand = ref StringMap.empty in
+    let attach = ref StringMap.empty in
+    let process_token token =
+      let is_attach = token.[0] = '$' in
+      let base =
+        if is_attach
+        then String.sub token 1 (String.length token - 1)
+        else token
+      in
+      let blen = String.length base in
+      if blen = 0 then raise_notrace Vof_return;
+      match String.index_opt base '(' with
+      | Some 0 -> raise_notrace Vof_return
+      | Some pi when blen >= pi + 2 && base.[blen - 1] = ')' -> (
+        let name = String.sub base 0 pi in
+        let inner = String.sub base (pi + 1) (blen - pi - 2) in
+        match parse_selection_str inner with
+        | None -> raise_notrace Vof_return
+        | Some sub ->
+          if is_attach
+          then attach := StringMap.add name sub !attach
+          else expand := StringMap.add name sub !expand
+      )
+      | Some _ -> raise_notrace Vof_return
+      | None when is_attach ->
+        attach := StringMap.add base default_selection !attach
+      | None when base.[0] = '!' ->
+        if blen < 2 then raise_notrace Vof_return;
+        excludes := StringSet.add (String.sub base 1 (blen - 1)) !excludes
+      | None -> includes := StringSet.add base !includes
+    in
+    let process = function
+      | "*" -> star := true
+      | "" -> ()
+      | token -> process_token token
+    in
+    List.iter process tokens;
+    Some
+      {
+        star = !star;
+        excludes = !excludes;
+        includes = !includes;
+        expand = !expand;
+        attach = !attach;
+      }
+  in
+  match split_select s with
+  | None | (exception Vof_return) -> None
+  | Some [] | Some [ "" ] -> Some default_selection
+  | Some tokens -> (
+    try parse_tokens tokens with Vof_return -> None
+  )
+;;
+
+let parse_filter key value =
+  let parse_val s i =
+    let op_str = String.sub s 0 i in
+    let rest = String.sub s (i + 1) (String.length s - i - 1) in
+    match op_str with
+    | "lt" | "under" | "before" -> Some (Lt rest)
+    | "lte" | "upto" -> Some (Lte rest)
+    | "gt" | "over" | "after" -> Some (Gt rest)
+    | "gte" | "atleast" -> Some (Gte rest)
+    | "has" -> Some (Has rest)
+    | "between" -> (
+      match String.split_on_char ':' rest with
+      | [ a; b ] -> Some (Between (a, b))
+      | _ -> None
+    )
+    | "in" -> (
+      match String.split_on_char ':' rest with
+      | [] | [ "" ] -> None
+      | l -> Some (In l)
+    )
+    | _ -> Some (Eq s)
+  in
+  match key with
+  | "" | "!" -> None
+  | _ -> (
+    let klen = String.length key in
+    let negate = key.[klen - 1] = '!' in
+    let field_str = if negate then String.sub key 0 (klen - 1) else key in
+    let field_path = String.split_on_char '.' field_str in
+    match String.index_opt value ':' with
+    | None -> Some { field_path; negate; op = Eq value }
+    | Some i ->
+      let| op = parse_val value i in
+      Some { field_path; negate; op }
+  )
+;;
 
 let make_query ?warn params =
-  ignore (warn, params);
-  failwith "unimplemented"
+  let add_warn w =
+    match warn with
+    | Some r -> r := w :: !r
+    | None -> ()
+  in
+  let sel = ref default_selection in
+  let prune = ref StringSet.empty in
+  let max_val = ref 100 in
+  let page_val = ref 1 in
+  let filters = ref [] in
+  let process (key, value) =
+    match key with
+    | "" -> add_warn (`Vof_unknown_param "empty string")
+    | "select~" -> (
+      match parse_selection_str value with
+      | Some s -> sel := s
+      | None ->
+        add_warn (`Vof_invalid_param (key, value));
+        sel := default_selection
+    )
+    | "prune~" ->
+      let add acc s = if s = "" then acc else StringSet.add s acc in
+      prune :=
+        String.split_on_char ',' value |> List.fold_left add StringSet.empty
+    | "max~" -> (
+      match int_of_string_opt value with
+      | Some n when n > 0 -> max_val := n
+      | _ -> add_warn (`Vof_invalid_param (key, value))
+    )
+    | "page~" -> (
+      match int_of_string_opt value with
+      | Some n when n > 0 -> page_val := n
+      | _ -> add_warn (`Vof_invalid_param (key, value))
+    )
+    | k when k.[String.length k - 1] = '~' -> add_warn (`Vof_unknown_param key)
+    | _ -> (
+      match parse_filter key value with
+      | Some f -> filters := f :: !filters
+      | None -> add_warn (`Vof_invalid_param (key, value))
+    )
+  in
+  List.iter process params;
+  {
+    select = !sel;
+    prune = !prune;
+    filters = List.rev !filters;
+    max = !max_val;
+    page = !page_val;
+  }
 ;;
 
 (** [select ctx s v] Filter record, series or record list [v] with selection [s]
