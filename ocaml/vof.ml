@@ -1277,6 +1277,12 @@ let build_msg ctx ?warn q ?msg v =
 ;;
 
 let msg_record schema msg =
-  ignore (schema, msg);
-  failwith "unimplemented"
+  let each_type field_name km sm =
+    let records = KeyMap.to_seq km |> Seq.map snd |> List.of_seq in
+    match records with
+    | [] -> sm
+    | _ ->
+      StringMap.add field_name (List (List.map (fun r -> Record r) records)) sm
+  in
+  schema, StringMap.fold each_type msg StringMap.empty
 ;;

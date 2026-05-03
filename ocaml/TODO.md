@@ -16,7 +16,7 @@
 - [x] Implement `make_query`
 - [x] Implement `select`
 - [ ] Implement `build_msg`
-- [ ] Implement `msg_record`
+- [x] Implement `msg_record`
 
 ### Details
 
