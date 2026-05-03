@@ -22,7 +22,13 @@ module StringSet : Set.S with type elt = string
 module StringMap : Map.S with type key = string
 module IntMap : Map.S with type key = int
 
-type schema = { path: string; keys: string list; required: string list }
+type schema = {
+  path: string;
+  msg_field: string option;
+  keys: string list;
+  required: string list;
+}
+
 type decimal = int * int
 type ratio = int * int
 type date = { year: int; month: int; day: int }
@@ -119,7 +125,12 @@ module Context : sig
       namespace already exists and hints are provided, they are validated (or
       updated in update mode). *)
   val schema :
-    t -> ?keys:string list -> ?required:string list -> string -> schema
+    t ->
+    ?msg_field:string ->
+    ?keys:string list ->
+    ?required:string list ->
+    string ->
+    schema
 
   (** [add_fetchers ctx fl] registers record fetchers keyed by namespace path,
       used for expanding references. *)

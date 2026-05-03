@@ -8,7 +8,12 @@ let ( let| ) = Option.bind
 
 exception Vof_return
 
-type schema = { path: string; keys: string list; required: string list }
+type schema = {
+  path: string;
+  msg_field: string option;
+  keys: string list;
+  required: string list;
+}
 
 let both_opt = function
   | Some a, Some b -> Some (a, b)
@@ -137,7 +142,7 @@ module Context = struct
     else Some (Array.unsafe_get idx.id_syms id)
   ;;
 
-  let schema ctx ?keys ?required rel_path =
+  let schema ctx ?msg_field ?keys ?required rel_path =
     let path = ctx.root ^ "." ^ rel_path in
     let validate_ctx idx ks rs =
       let sort = List.sort String.compare in
@@ -174,7 +179,8 @@ module Context = struct
     match idx_opt, have_hints with
     | None, false ->
       invalid_arg ("Vof.Context.schema: unknown namespace " ^ path)
-    | Some idx, false -> { path; keys = idx.keys; required = idx.required }
+    | Some idx, false ->
+      { path; msg_field; keys = idx.keys; required = idx.required }
     | None, true ->
       let idx = idx_make () in
       let ks = Option.value ~default:[] keys in
@@ -182,12 +188,12 @@ module Context = struct
       idx.keys <- ks;
       idx.required <- rs;
       ctx.registry <- StringMap.add path idx ctx.registry;
-      { path; keys = ks; required = rs }
+      { path; msg_field; keys = ks; required = rs }
     | Some idx, true ->
       let ks = Option.value ~default:idx.keys keys in
       let rs = Option.value ~default:idx.required required in
       if ctx.update then update_ctx idx ks rs else validate_ctx idx ks rs;
-      { path; keys = ks; required = rs }
+      { path; msg_field; keys = ks; required = rs }
   ;;
 
   let make ?(update = false) root =
@@ -495,11 +501,15 @@ module Reader = struct
   ;;
 
   let timespan = function
-    | Timespan { hmonths; days; secs } -> Some (hmonths, days, secs)
+    | Timespan ts -> Some ts
     | Raw_blist [ a; b; c ]
     | Raw_tlist [ a; b; c ]
     | Raw_list [ a; b; c ]
-    | List [ a; b; c ] -> three_opt (int a, int b, int c)
+    | List [ a; b; c ] -> (
+      match int a, int b, int c with
+      | Some hmonths, Some days, Some secs -> Some { hmonths; days; secs }
+      | _ -> None
+    )
     | _ -> None
   ;;
 

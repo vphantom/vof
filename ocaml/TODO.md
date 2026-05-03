@@ -88,9 +88,8 @@ val select : Context.t -> ?warn:warnings -> selection -> t -> t
     warnings.  Duplicate records prefer the ones with the most fields set. *)
 val build_msg : Context.t -> ?warn:warnings -> query -> ?msg:msg -> t -> msg * t
 
-(** [msg_record ms msg] creates an [$msg] from [msg] using [ms], which
-    associates [schema.path] keys to [$msg] field name values. *)
-val msg_record : string StringMap.t -> msg -> record
+(** [msg_record ms msg] creates an [$msg] with [schema] from [msg]. *)
+val msg_record : schema -> msg -> record
 ```
 
 The `msg` type is opaque to our callers (`type msg` without `=`).
