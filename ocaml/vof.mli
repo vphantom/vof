@@ -18,6 +18,8 @@
     val of_vof : Vof.t -> 'a option
     ]} *)
 
+(** {1 Core Types} *)
+
 module StringSet : Set.S with type elt = string
 module StringMap : Map.S with type key = string
 module IntMap : Map.S with type key = int
@@ -87,6 +89,8 @@ type t =
 (** Record *)
 and record = schema * t StringMap.t
 
+(** {1 Context} *)
+
 module Context : sig
   (** Encoding context.
 
@@ -120,10 +124,19 @@ module Context : sig
       Requires [update] mode. No-op if nothing was modified since loading. *)
   val save : t -> unit
 
-  (** [schema ctx ?keys ?required rel_path] declares or retrieves a schema for
-      the namespace at [rel_path] (relative to the context root). If the
-      namespace already exists and hints are provided, they are validated (or
-      updated in update mode). *)
+  (** [schema ctx ?msg_field ?keys ?required rel_path] declares or retrieves a
+      schema for the namespace at [rel_path] (relative to the context root). If
+      the namespace already exists and hints are provided, they are validated
+      (or updated in update mode).
+
+      [msg_field] is the name of the field in your [$msg] schema containing a
+      list of records of this type.
+
+      [keys] are lists of field names which combine to form a record's primary
+      key.
+
+      [required] are fields which should be included along with keys even in
+      references. *)
   val schema :
     t ->
     ?msg_field:string ->
@@ -153,12 +166,14 @@ module Context : sig
   val idx_sym : index -> int -> string option
 end
 
+(** {1 Decoding} *)
+
 module Reader : sig
   (** Schema-guided value interpretation.
 
       Each helper accepts a VOF value in any representation — fully typed, raw
-      binary, raw text, or raw CBOR — and attempts to produce the corresponding
-      OCaml value. Returns [None] on type mismatch or malformed input. Use these
+      binary or raw text — and attempts to produce the corresponding OCaml
+      value. Returns [None] on type mismatch or malformed input. Use these
       inside your [of_vof] functions. *)
 
   val int : t -> int option
@@ -207,6 +222,21 @@ module Reader : sig
     Context.t -> schema -> (t StringMap.t -> 'c option) -> t -> 'c list option
 end
 
+(** [pp_ref r] returns a string representation of a record reference as
+    ["path(key1,key2...)"] with all fields (keys and required) or a full record
+    as ["path{key1,key2,...}"] with only keys and required fields. *)
+val pp_ref : record -> string
+
+(** [pp v] returns a string representation of basic types, ["?"] otherwise. Uses
+    [pp_ref] for records. *)
+val pp : t -> string
+
+(** {1 Records} *)
+
+(** [is_ref r] returns true if [r] is a record reference (no field outside of
+    keys and required). *)
+val is_ref : record -> bool
+
 (** [equal a b] is structural equality for VOF values. Unlike polymorphic [=],
     this correctly handles [Float] (via [Float.equal]), maps, arrays, and
     ignores schema identity in records/enums/variants. *)
@@ -218,3 +248,87 @@ val equal : t -> t -> bool
     omitted; removed fields appear as {!Null}. Nested records and series are
     diffed recursively. Returns [None] if the inputs are not both records. *)
 val diff : t -> t -> t option
+
+(** {1 Services}
+
+    HTTP API endpoint helpers to parse query parameters, filter record fields
+    and prepare [$msg] responses. Row filtering (including pruning) and
+    pagination are left to the application. *)
+
+(** {2 Warnings} *)
+
+type warning =
+  [ `Vof_malformed_select of string
+  | `Vof_malformed_filter of string
+  | `Vof_fetch_failed of string * string ]
+
+(** Your list of warnings. Note that this module adds warnings to the head of
+    this list, so it is chronologically reversed. *)
+type warnings = warning list ref
+
+(** [pp_warn w] returns a string representation of a warning, in simple English.
+*)
+val pp_warn : warning -> string
+
+(** {2 Queries} *)
+
+(** Parsed [select~] parameter. A field is selected when
+    [(star && not excluded) || included || expanded || attached].
+
+    - [expand] maps field names to sub-selections for inline expansion
+      ([foo(…)]).
+
+    - [attach] maps field names to sub-selections for [$msg] attachment
+      ([$foo(…)]). *)
+type selection = {
+  star: bool;
+  excludes: StringSet.t;
+  includes: StringSet.t;
+  expand: selection StringMap.t;
+  attach: selection StringMap.t;
+}
+
+(** Everything empty and [star = true]. *)
+val default_selection : selection
+
+type filter_op =
+  | Eq of string
+  | Lt of string
+  | Lte of string
+  | Gt of string
+  | Gte of string
+  | Between of string * string
+  | Has of string
+  | In of string list
+
+type filter = { field_path: string list; negate: bool; op: filter_op }
+
+type query = {
+  select: selection; (** Defaults to [default_selection] *)
+  prune: StringSet.t;
+  filters: filter list;
+  max: int;
+  page: int;
+  params: (string * string) list; (** Non-tilde, non-filter pairs *)
+}
+
+(** [make_query ?warn params] Create a query from a list of key-value pairs.
+    Malformed [select~] gracefully downgrades to ["*"] and incorrect filters are
+    ignored. Specify [warn] to collect warnings. *)
+val make_query : ?warn:warnings -> (string * string) list -> query
+
+(** {2 Messages}
+
+    Build and update [$msg] records. *)
+
+(** Records aggregated by type and de-duplicated by key tuples. *)
+type msg
+
+(** [build_msg ctx q ?msg v] Create/update [?msg] by processing record, series
+    or record list [v] with query [q] in context [ctx], returning the
+    accumulated [msg] and the filtered down [v]. Specify [warn] to collect
+    warnings. Duplicate records preserve the one with the most fields set. *)
+val build_msg : Context.t -> ?warn:warnings -> query -> ?msg:msg -> t -> msg * t
+
+(** [msg_record ms msg] creates an [$msg] with [schema] from [msg]. *)
+val msg_record : schema -> msg -> record

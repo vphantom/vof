@@ -9,90 +9,20 @@
 
 ## API Helpers
 
-```ocaml
-type selection = {
-  star: bool;
-  excludes: StringSet.t;
-  includes: StringSet.t;
-  expand: selection StringMap.t;
-  attach: selection StringMap.t;
-}
+### Implementation Steps
 
-type filter_op =
-  | Eq of string
-  | Lt of string
-  | Lte of string
-  | Gt of string
-  | Gte of string
-  | Between of string * string
-  | Has of string
-  | In of string list
+- [ ] Update `vof.mli` and create stubs in `vof.ml` to allow compilation
+- [ ] Implement `is_ref`, `pp_ref`, `pp` (which uses `pp_ref`) and `pp_warn`
+- [ ] Implement `make_query`
+- [ ] Implement `select`
+- [ ] Implement `build_msg`
+- [ ] Implement `msg_record`
 
-type filter = {
-  path: string list;  (* "lines.product" -> ["lines";"product"] *)
-  negate: bool;
-  op: filter_op;
-}
+### Details
 
-type query = {
-  select: selection;
-  prune: StringSet.t;
-  filters: filter list;
-  max: int;
-  page: int;
-  params: (string * string) list;
-}
+The `msg` type is opaque to our callers (`type msg` without `=`).  When `build_msg` encounters a schema with `msg_field = None`, it will raise (probably `invalid_arg`).  We're making it optional so that our callers who don't need $msg handling don't have to bother naming it.  We'll key `msg` on schema.msg_field (not schema.path) to facilitate `msg_record`.
 
-type warning = [
-  | `Vof_malformed_select of string
-  | `Vof_malformed_filter of string
-  | `Vof_fetch_failed of string * string
-]
-
-(** [is_ref r] returns true if [r] is a record reference (no field outside of
-    keys and required). *)
-val is_ref : record -> bool
-
-(** Your list of warnings.  Note that this module adds warnings to the head of
-    this list, so it is chronologically reversed. *)
-type warnings = warning list ref
-
-(** [pp v] returns a string representation of common scalars, ["?"] otherwise.
-    Record references are returned as [("path(key1,key2...)")] but populated
-    records are ["?"] like other complex types. *)
-val pp : t -> string
-
-(** [pp_ref r] returns a string representation of a record reference as
-    ["path(key1,key2...)"]. *)
-val pp_ref : record -> string
-
-(** [pp_warn w] returns a string representation of a warning, in simple English. *)
-val pp_warn : warning -> string
-
-(** Aggregated records and record references. *)
-type msg = (record KeyMap.t) StringMap.t
-
-(** [make_query ?warn params] Create a query from a list of key-value pairs.
-    Malformed [select~] gracefully downgrades to ["*"] and incorrect filters are
-    ignored.  Specify [warn] to collect warnings.  *)
-val make_query : ?warn:warnings -> (string * string) list -> query
-
-(** [select ctx s v] Filter record, series or record list [v] with selection [s]
-    in context [ctx].  Specify [warn] to collect warnings.  Note that [attach]
-    keys are handled by [build_msg], not here. (NOTE: not in the MLI) *)
-val select : Context.t -> ?warn:warnings -> selection -> t -> t
-
-(** [build_msg ctx q ?msg v] Create/update [?msg] by processing record, series
-    or record list [v] with query [q] in context [ctx], returning the
-    accumulated [msg] and the filtered down [v].  Specify [warn] to collect
-    warnings.  Duplicate records prefer the ones with the most fields set. *)
-val build_msg : Context.t -> ?warn:warnings -> query -> ?msg:msg -> t -> msg * t
-
-(** [msg_record ms msg] creates an [$msg] with [schema] from [msg]. *)
-val msg_record : schema -> msg -> record
-```
-
-The `msg` type is opaque to our callers (`type msg` without `=`).
+In `query`, we make `params` all non-tilde KV pairs which failed to be parsed as `filters`.
 
 A field is selected if `(star && not excluded) || included || expanded || attached` and the default `star` is true.
 

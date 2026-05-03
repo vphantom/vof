@@ -788,6 +788,10 @@ module Reader = struct
   ;;
 end
 
+let pp v = ignore v; failwith "unimplemented"
+let pp_ref v = ignore v; failwith "unimplemented"
+let is_ref r = ignore r; failwith "unimplemented"
+
 let rec equal (a : t) (b : t) : bool =
   match a, b with
   | Float a, Float b -> Float.equal a b
@@ -910,4 +914,78 @@ let diff a b =
   match a, b with
   | Record ra, Record rb -> Some (Record (diff_rec ra rb))
   | _ -> None
+;;
+
+type selection = {
+  star: bool;
+  excludes: StringSet.t;
+  includes: StringSet.t;
+  expand: selection StringMap.t;
+  attach: selection StringMap.t;
+}
+
+let default_selection =
+  {
+    star = true;
+    excludes = StringSet.empty;
+    includes = StringSet.empty;
+    expand = StringMap.empty;
+    attach = StringMap.empty;
+  }
+;;
+
+type filter_op =
+  | Eq of string
+  | Lt of string
+  | Lte of string
+  | Gt of string
+  | Gte of string
+  | Between of string * string
+  | Has of string
+  | In of string list
+
+type filter = { field_path: string list; negate: bool; op: filter_op }
+
+type query = {
+  select: selection;
+  prune: StringSet.t;
+  filters: filter list;
+  max: int;
+  page: int;
+  params: (string * string) list;
+}
+
+type msg = record KeyMap.t StringMap.t
+
+type warning =
+  [ `Vof_malformed_select of string
+  | `Vof_malformed_filter of string
+  | `Vof_fetch_failed of string * string ]
+
+type warnings = warning list ref
+
+let pp_warn w = ignore w; failwith "unimplemented"
+
+let make_query ?warn params =
+  ignore (warn, params);
+  failwith "unimplemented"
+;;
+
+(** [select ctx s v] Filter record, series or record list [v] with selection [s]
+    in context [ctx]. Specify [warn] to collect warnings. Note that [attach]
+    keys are handled by [build_msg], not here. (NOTE: not in the MLI) *)
+let select ctx ?warn sel v =
+  ignore (ctx warn, sel, v);
+  failwith "unimplemented"
+;;
+
+let build_msg ctx ?warn q ?msg v =
+  ignore (ctx, warn, q, msg, v);
+  ignore select;
+  failwith "unimplemented"
+;;
+
+let msg_record schema msg =
+  ignore (schema, msg);
+  failwith "unimplemented"
 ;;
