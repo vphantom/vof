@@ -103,10 +103,10 @@ module Context = struct
     mutable file: string option;
     root: string;
     mutable registry: index StringMap.t;
-    mutable fetchers: (record -> record option) StringMap.t;
+    mutable fetchers: (record -> (record, string) result) StringMap.t;
   }
 
-  type fetcher = string * (record -> record option)
+  type fetcher = string * (record -> (record, string) result)
 
   let add_fetchers ctx fl =
     let add sm (k, v) = StringMap.add k v sm in
@@ -1165,12 +1165,13 @@ let parse_filter key value =
   )
 ;;
 
+let add_warn wl_opt w =
+  match wl_opt with
+  | Some r -> r := w :: !r
+  | None -> ()
+;;
+
 let make_query ?warn params =
-  let add_warn w =
-    match warn with
-    | Some r -> r := w :: !r
-    | None -> ()
-  in
   let sel = ref default_selection in
   let prune = ref StringSet.empty in
   let max_val = ref 100 in
@@ -1178,12 +1179,12 @@ let make_query ?warn params =
   let filters = ref [] in
   let process (key, value) =
     match key with
-    | "" -> add_warn (`Vof_unknown_param "empty string")
+    | "" -> add_warn warn (`Vof_unknown_param "empty string")
     | "select~" -> (
       match parse_selection_str value with
       | Some s -> sel := s
       | None ->
-        add_warn (`Vof_invalid_param (key, value));
+        add_warn warn (`Vof_invalid_param (key, value));
         sel := default_selection
     )
     | "prune~" ->
@@ -1193,18 +1194,19 @@ let make_query ?warn params =
     | "max~" -> (
       match int_of_string_opt value with
       | Some n when n > 0 -> max_val := n
-      | _ -> add_warn (`Vof_invalid_param (key, value))
+      | _ -> add_warn warn (`Vof_invalid_param (key, value))
     )
     | "page~" -> (
       match int_of_string_opt value with
       | Some n when n > 0 -> page_val := n
-      | _ -> add_warn (`Vof_invalid_param (key, value))
+      | _ -> add_warn warn (`Vof_invalid_param (key, value))
     )
-    | k when k.[String.length k - 1] = '~' -> add_warn (`Vof_unknown_param key)
+    | k when k.[String.length k - 1] = '~' ->
+      add_warn warn (`Vof_unknown_param key)
     | _ -> (
       match parse_filter key value with
       | Some f -> filters := f :: !filters
-      | None -> add_warn (`Vof_invalid_param (key, value))
+      | None -> add_warn warn (`Vof_invalid_param (key, value))
     )
   in
   List.iter process params;
@@ -1220,9 +1222,52 @@ let make_query ?warn params =
 (** [select ctx s v] Filter record, series or record list [v] with selection [s]
     in context [ctx]. Specify [warn] to collect warnings. Note that [attach]
     keys are handled by [build_msg], not here. (NOTE: not in the MLI) *)
-let select ctx ?warn sel v =
-  ignore (ctx warn, sel, v);
-  failwith "unimplemented"
+let select (ctx : Context.t) ?warn sel v =
+  let is_selected sel k =
+    (sel.star && not (StringSet.mem k sel.excludes))
+    || StringSet.mem k sel.includes
+    || StringMap.mem k sel.expand
+    || StringMap.mem k sel.attach
+  in
+  let rec filter_record sel (schema, sm) =
+    let each k v acc =
+      if is_selected sel k
+      then StringMap.add k (maybe_expand sel k v) acc
+      else acc
+    in
+    schema, StringMap.fold each sm StringMap.empty
+  and maybe_expand sel k v =
+    match StringMap.find_opt k sel.expand with
+    | None -> v
+    | Some sub -> expand_value sub v
+  and expand_value sub = function
+    | Record r when is_ref r -> (
+      let schema = fst r in
+      match StringMap.find_opt schema.path ctx.fetchers with
+      | None -> Record r
+      | Some fetcher -> (
+        match fetcher r with
+        | Ok full -> Record (filter_record sub full)
+        | Error e ->
+          add_warn warn (`Vof_fetch_failed (schema.path, e));
+          Record r
+      )
+    )
+    | Record r -> Record (filter_record sub r)
+    | Series records -> Series (List.map (filter_record sub) records)
+    | List items -> List (List.map (expand_value sub) items)
+    | v -> v
+  in
+  match v with
+  | Record r -> Record (filter_record sel r)
+  | Series records -> Series (List.map (filter_record sel) records)
+  | List items ->
+    let each = function
+      | Record r -> Record (filter_record sel r)
+      | other -> other
+    in
+    List (List.map each items)
+  | v -> v
 ;;
 
 let build_msg ctx ?warn q ?msg v =

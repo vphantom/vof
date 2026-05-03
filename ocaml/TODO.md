@@ -14,7 +14,7 @@
 - [x] Update `vof.mli` and create stubs in `vof.ml` to allow compilation
 - [x] Implement `is_ref`, `pp_ref`, `pp` (which uses `pp_ref`) and `pp_warn`
 - [x] Implement `make_query`
-- [ ] Implement `select`
+- [x] Implement `select`
 - [ ] Implement `build_msg`
 - [ ] Implement `msg_record`
 

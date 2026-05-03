@@ -108,7 +108,7 @@ module Context : sig
   type t
 
   (** A named record fetcher for expanding references during selection. *)
-  type fetcher = string * (record -> record option)
+  type fetcher = string * (record -> (record, string) result)
 
   (** [make ?update root] creates a fresh context rooted at [root]. When
       [update] is [true] (default [false]), unknown symbols are auto-registered
