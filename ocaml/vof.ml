@@ -1219,10 +1219,38 @@ let make_query ?warn params =
   }
 ;;
 
-(** [select ctx s v] Filter record, series or record list [v] with selection [s]
-    in context [ctx]. Specify [warn] to collect warnings. Note that [attach]
-    keys are handled by [build_msg], not here. (NOTE: not in the MLI) *)
-let select (ctx : Context.t) ?warn sel v =
+let make_ref (schema, sm) =
+  let keep k _ = List.mem k schema.keys || List.mem k schema.required in
+  schema, StringMap.filter keep sm
+;;
+
+let build_msg (ctx : Context.t) ?warn q ?msg v =
+  let msg_acc = ref (Option.value ~default:StringMap.empty msg) in
+  (* Adds a record to msg_acc if it's not already in. Replaces it if it has more
+     fields. *)
+  let add_to_msg (schema, sm) =
+    if schema.msg_field = None
+    then invalid_arg ("Vof.build_msg: no msg_field for " ^ schema.path);
+    let- field_name = schema.msg_field in
+    let key_tuple =
+      List.map
+        (fun k -> StringMap.find_opt k sm |> Option.value ~default:Null)
+        schema.keys
+    in
+    let km =
+      StringMap.find_opt field_name !msg_acc
+      |> Option.value ~default:KeyMap.empty
+    in
+    let should_replace =
+      match KeyMap.find_opt key_tuple km with
+      | Some (_, existing) -> StringMap.(cardinal sm > cardinal existing)
+      | None -> true
+    in
+    if should_replace
+    then
+      msg_acc :=
+        StringMap.add field_name (KeyMap.add key_tuple (schema, sm) km) !msg_acc
+  in
   let is_selected sel k =
     (sel.star && not (StringSet.mem k sel.excludes))
     || StringSet.mem k sel.includes
@@ -1232,14 +1260,18 @@ let select (ctx : Context.t) ?warn sel v =
   let rec filter_record sel (schema, sm) =
     let each k v acc =
       if is_selected sel k
-      then StringMap.add k (maybe_expand sel k v) acc
+      then StringMap.add k (process_field sel k v) acc
       else acc
     in
     schema, StringMap.fold each sm StringMap.empty
-  and maybe_expand sel k v =
-    match StringMap.find_opt k sel.expand with
-    | None -> v
-    | Some sub -> expand_value sub v
+  and process_field sel k v =
+    match StringMap.find_opt k sel.attach with
+    | Some sub -> attach_value sub v
+    | None -> (
+      match StringMap.find_opt k sel.expand with
+      | Some sub -> expand_value sub v
+      | None -> v
+    )
   and expand_value sub = function
     | Record r when is_ref r -> (
       let schema = fst r in
@@ -1257,23 +1289,45 @@ let select (ctx : Context.t) ?warn sel v =
     | Series records -> Series (List.map (filter_record sub) records)
     | List items -> List (List.map (expand_value sub) items)
     | v -> v
+  and attach_value sub = function
+    | Record r when is_ref r -> (
+      let schema = fst r in
+      match StringMap.find_opt schema.path ctx.fetchers with
+      | None -> Record r
+      | Some fetcher -> (
+        match fetcher r with
+        | Ok full ->
+          let filtered = filter_record sub full in
+          add_to_msg filtered;
+          Record (make_ref filtered)
+        | Error e ->
+          add_warn warn (`Vof_fetch_failed (schema.path, e));
+          Record r
+      )
+    )
+    | Record r ->
+      let filtered = filter_record sub r in
+      add_to_msg filtered;
+      Record (make_ref filtered)
+    | Series records ->
+      let attach_one r =
+        let filtered = filter_record sub r in
+        add_to_msg filtered; make_ref filtered
+      in
+      Series (List.map attach_one records)
+    | List items -> List (List.map (attach_value sub) items)
+    | v -> v
+  in
+  let list_item = function
+    | Record r -> Record (filter_record q.select r)
+    | other -> other
   in
   match v with
-  | Record r -> Record (filter_record sel r)
-  | Series records -> Series (List.map (filter_record sel) records)
-  | List items ->
-    let each = function
-      | Record r -> Record (filter_record sel r)
-      | other -> other
-    in
-    List (List.map each items)
-  | v -> v
-;;
-
-let build_msg ctx ?warn q ?msg v =
-  ignore (ctx, warn, q, msg, v);
-  ignore select;
-  failwith "unimplemented"
+  | Record r -> !msg_acc, Record (filter_record q.select r)
+  | Series records ->
+    !msg_acc, Series (List.map (filter_record q.select) records)
+  | List items -> !msg_acc, List (List.map list_item items)
+  | v -> !msg_acc, v
 ;;
 
 let msg_record schema msg =

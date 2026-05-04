@@ -239,6 +239,9 @@ val pp : t -> string
     keys and required). *)
 val is_ref : record -> bool
 
+(** [make_ref r] strips record [r] of fields outside of keys and required. *)
+val make_ref : record -> record
+
 (** [equal a b] is structural equality for VOF values. Unlike polymorphic [=],
     this correctly handles [Float] (via [Float.equal]), maps, arrays, and
     ignores schema identity in records/enums/variants. *)
