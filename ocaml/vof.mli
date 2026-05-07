@@ -11,12 +11,15 @@
         encoding to any wire format. *)
     val to_vof : 'a -> Vof.t
 
-    (** Construct a domain object from a VOF value. Uses {!Vof.Reader} helpers
+    (** Construct a domain object from a VOF value. Uses {!Vof.Read} helpers
         internally to interpret both fully-typed values and raw wire
         representations. For patchable records, the result may be a partial
-        record (subset of fields). *)
-    val of_vof : Vof.t -> 'a option
-    ]} *)
+        record (subset of fields).  If [db] is provided, fetches the last known
+        version when possible instead of always starting from empty. *)
+    val of_vof : Vof.Context.t -> ?db:... -> ?warn:Vof.warnings -> Vof.t -> 'a option
+    ]}
+
+    See [README.md] for a complete example with storage integration. *)
 
 (** {1 Core Types} *)
 
@@ -166,15 +169,79 @@ module Context : sig
   val idx_sym : index -> int -> string option
 end
 
+(** {1 Warnings} *)
+
+type warning = [
+  | `Vof_bad_field of string * string
+  | `Vof_fetch_failed of string * string
+  | `Vof_invalid_param of string * string
+  | `Vof_unknown_param of string
+] [@@ocamlformat "disable"]
+
+(** Your list of warnings. Note that this module adds warnings to the head of
+    this list, so it is chronologically reversed. *)
+type warnings = warning list ref
+
+(** [pp_warn w] returns a string representation of a warning, in simple English.
+*)
+val pp_warn : warning -> string
+
 (** {1 Decoding} *)
 
-module Reader : sig
+module Read : sig
   (** Schema-guided value interpretation.
 
       Each helper accepts a VOF value in any representation — fully typed, raw
       binary or raw text — and attempts to produce the corresponding OCaml
       value. Returns [None] on type mismatch or malformed input. Use these
       inside your [of_vof] functions. *)
+
+  (** [each_field ?warn r acc f] applies [f k v acc] for each field [k] in
+      record [r]. Returns [None] if any field fails to decode or if [f] raised
+      [Vof_bad_field]. Specify [?warn] to collect warnings. *)
+  val each_field :
+    ?warn:warnings -> record -> 'a -> (string -> t -> 'a -> 'a) -> 'a option
+
+  (** [field reader ?null v] Reads value [v] using [reader]. If [v] is [Null]
+      and [null] is set, [null] is returned. If [v] fails to pass [reader] or is
+      [Null] without [null], exception [Vof_bad_field] is raised. *)
+  val field : (t -> 'a option) -> ?null:'a -> t -> 'a
+
+  (** [children ctx schema ?warn ~of_vof ~key_of ~key_read existing v] applies
+      PATCH semantics to a list of dependent child records. Parses raw list [v]
+      into the resulting child list.
+
+      - Items which are references (only key/required fields) with a recognized
+        key are deletions: matching children are removed from [existing].
+      - Items with a recognized key matching an entry in [existing] are edits:
+        [of_vof] receives [Some base_child] to merge onto.
+      - Items without a recognized key, or with a key not in [existing], are
+        additions: [of_vof] receives [None].
+
+      Returns [None] if [v] is not a list. Items which fail structural parsing
+      produce a warning (if [?warn] is provided); items where [of_vof] returns
+      [None] are silently skipped (caller's [of_vof] is responsible for its own
+      warnings).
+
+      @param of_vof
+        converts a raw VOF item into a domain child, optionally building on a
+        base value ([Some existing_child] for edits, [None] for new items)
+      @param key_of extracts a comparable key from a domain child
+      @param key_read
+        extracts a comparable key from a raw field map (used for classification)
+      @param existing
+        current list of children (i.e. from DB or from an empty record for new
+        parents) *)
+  val children :
+    Context.t ->
+    schema ->
+    ?warn:warnings ->
+    of_vof:('a option -> t -> 'a option) ->
+    key_of:('a -> 'b) ->
+    key_read:(t StringMap.t -> 'b option) ->
+    'a list ->
+    t ->
+    'a list option
 
   val int : t -> int option
   val uint : t -> int option
@@ -260,22 +327,6 @@ val diff : t -> t -> t option
     and prepare [$msg] responses. Row filtering (including pruning) and
     pagination are left to the application. *)
 
-(** {2 Warnings} *)
-
-type warning = [
-  | `Vof_unknown_param of string
-  | `Vof_invalid_param of string * string
-  | `Vof_fetch_failed of string * string
-] [@@ocamlformat "disable"]
-
-(** Your list of warnings. Note that this module adds warnings to the head of
-    this list, so it is chronologically reversed. *)
-type warnings = warning list ref
-
-(** [pp_warn w] returns a string representation of a warning, in simple English.
-*)
-val pp_warn : warning -> string
-
 (** {2 Queries} *)
 
 (** Parsed [select~] parameter. A field is selected when
@@ -329,10 +380,18 @@ val make_query : ?warn:warnings -> (string * string) list -> query
 (** Records aggregated by type and de-duplicated by key tuples. *)
 type msg
 
+(** [make_msg ()] creates a fresh empty message accumulator. *)
+val make_msg : unit -> msg
+
+(** [msg_add msg r] adds record [r] to [msg] unfiltered. Duplicate records
+    preserve the one with the most fields set. Raises [Invalid_argument] if the
+    record's schema has no [msg_field]. *)
+val msg_add : msg -> record -> msg
+
 (** [build_msg ctx q ?msg v] Create/update [?msg] by processing record, series
     or record list [v] with query [q] in context [ctx], returning the
     accumulated [msg] and the filtered down [v]. Specify [warn] to collect
-    warnings. Duplicate records preserve the one with the most fields set. *)
+    warnings. Uses [msg_add] to aggregate records. *)
 val build_msg : Context.t -> ?warn:warnings -> query -> ?msg:msg -> t -> msg * t
 
 (** [msg_record ms msg] creates an [$msg] with [schema] from [msg]. *)

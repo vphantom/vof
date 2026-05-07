@@ -7,6 +7,7 @@ let ( let- ) v f = Option.iter f v
 let ( let| ) = Option.bind
 
 exception Vof_return
+exception Vof_bad_field
 
 type schema = {
   path: string;
@@ -328,7 +329,36 @@ module KeyMap = Map.Make (struct
   let compare = Stdlib.compare
 end)
 
-module Reader = struct
+type warning = [
+  | `Vof_bad_field of string * string
+  | `Vof_fetch_failed of string * string
+  | `Vof_invalid_param of string * string
+  | `Vof_unknown_param of string
+] [@@ocamlformat "disable"]
+
+type warnings = warning list ref
+
+let add_warn wl_opt w =
+  match wl_opt with
+  | Some r -> r := w :: !r
+  | None -> ()
+;;
+
+let pp_warn = function
+  | `Vof_bad_field (p, f) -> Printf.sprintf "bad record field: %s.%s" p f
+  | `Vof_fetch_failed (path, reason) ->
+    Printf.sprintf "fetch failed for %s: %s" path reason
+  | `Vof_invalid_param (f, v) -> Printf.sprintf "invalid parameter %s='%s'" f v
+  | `Vof_unknown_param s -> Printf.sprintf "unknown parameter: %s" s
+;;
+
+let is_ref (schema, sm) =
+  StringMap.for_all
+    (fun k _ -> List.mem k schema.keys || List.mem k schema.required)
+    sm
+;;
+
+module Read = struct
   (* NOTE: Null not useful here *)
 
   let[@tail_mod_cons] rec map_some f = function
@@ -687,6 +717,28 @@ module Reader = struct
     | _ -> enum v
   ;;
 
+  let each_field ?warn (schema, sm) acc f =
+    let last_key = ref "" in
+    let wrap k v acc =
+      last_key := k;
+      f k v acc
+    in
+    try Some (StringMap.fold wrap sm acc)
+    with Vof_bad_field ->
+      add_warn warn (`Vof_bad_field (schema.path, !last_key));
+      None
+  ;;
+
+  let field reader ?null v =
+    match v, null with
+    | Null, Some default -> default
+    | v, _ -> (
+      match reader v with
+      | Some x -> x
+      | None -> raise_notrace Vof_bad_field
+    )
+  ;;
+
   let record ctx schema f = function
     | Record (_, sm) -> f sm
     | Raw_tlist l ->
@@ -726,6 +778,49 @@ module Reader = struct
       in
       next 0 StringMap.empty l
     | _ -> None
+  ;;
+
+  let children ctx schema ?warn ~of_vof ~key_of ~key_read existing v =
+    let raw_items =
+      match v with
+      | Raw_tlist l | Raw_blist l | Raw_list l | List l -> Some l
+      | _ -> None
+    in
+    let| raw_items = raw_items in
+    let parse_sm item = record ctx schema Option.some item in
+    let n = List.length existing in
+    let base_tbl = Hashtbl.create n in
+    List.iter (fun c -> Hashtbl.replace base_tbl (key_of c) c) existing;
+    let deletions = Hashtbl.create 4 in
+    let replacements = Hashtbl.create 4 in
+    let additions = ref [] in
+    let classify item =
+      match parse_sm item with
+      | None -> add_warn warn (`Vof_bad_field (schema.path, "[]"))
+      | Some sm -> (
+        match key_read sm with
+        | None ->
+          let- child = of_vof None item in
+          additions := child :: !additions
+        | Some k when is_ref (schema, sm) -> Hashtbl.replace deletions k ()
+        | Some k -> (
+          let base = Hashtbl.find_opt base_tbl k in
+          match of_vof base item, base with
+          | None, _ -> ()
+          | Some child, None -> additions := child :: !additions
+          | Some child, Some _ -> Hashtbl.replace replacements k child
+        )
+      )
+    in
+    let filter c =
+      (* Keys are usually dead-simple, cheaper to re-fetch than to stash. *)
+      let k = key_of c in
+      if Hashtbl.mem deletions k
+      then None
+      else Some (Hashtbl.find_opt replacements k |> Option.value ~default:c)
+    in
+    List.iter classify raw_items;
+    Some (List.filter_map filter existing @ List.rev !additions)
   ;;
 
   let series ctx schema f = function
@@ -787,12 +882,6 @@ module Reader = struct
     | _ -> None
   ;;
 end
-
-let is_ref (schema, sm) =
-  StringMap.for_all
-    (fun k _ -> List.mem k schema.keys || List.mem k schema.required)
-    sm
-;;
 
 let rec pp = function
   | Null -> "NULL"
@@ -1032,23 +1121,6 @@ type query = {
   page: int;
 }
 
-type msg = record KeyMap.t StringMap.t
-
-type warning = [
-  | `Vof_unknown_param of string
-  | `Vof_invalid_param of string * string
-  | `Vof_fetch_failed of string * string
-] [@@ocamlformat "disable"]
-
-type warnings = warning list ref
-
-let pp_warn = function
-  | `Vof_invalid_param (f, v) -> Printf.sprintf "invalid parameter %s='%s'" f v
-  | `Vof_unknown_param s -> Printf.sprintf "unknown parameter: %s" s
-  | `Vof_fetch_failed (path, reason) ->
-    Printf.sprintf "fetch failed for %s: %s" path reason
-;;
-
 let rec parse_selection_str s =
   let split_select s =
     let tokens = ref [] in
@@ -1165,12 +1237,6 @@ let parse_filter key value =
   )
 ;;
 
-let add_warn wl_opt w =
-  match wl_opt with
-  | Some r -> r := w :: !r
-  | None -> ()
-;;
-
 let make_query ?warn params =
   let sel = ref default_selection in
   let prune = ref StringSet.empty in
@@ -1224,22 +1290,21 @@ let make_ref (schema, sm) =
   schema, StringMap.filter keep sm
 ;;
 
-let build_msg (ctx : Context.t) ?warn q ?msg v =
-  let msg_acc = ref (Option.value ~default:StringMap.empty msg) in
-  (* Adds a record to msg_acc if it's not already in. Replaces it if it has more
-     fields. *)
-  let add_to_msg (schema, sm) =
-    if schema.msg_field = None
-    then invalid_arg ("Vof.build_msg: no msg_field for " ^ schema.path);
-    let- field_name = schema.msg_field in
+type msg = record KeyMap.t StringMap.t
+
+let make_msg () = StringMap.empty
+
+let msg_add msg (schema, sm) =
+  match schema.msg_field with
+  | None -> invalid_arg ("Vof.msg_add: no msg_field for " ^ schema.path)
+  | Some field_name ->
     let key_tuple =
       List.map
         (fun k -> StringMap.find_opt k sm |> Option.value ~default:Null)
         schema.keys
     in
     let km =
-      StringMap.find_opt field_name !msg_acc
-      |> Option.value ~default:KeyMap.empty
+      StringMap.find_opt field_name msg |> Option.value ~default:KeyMap.empty
     in
     let should_replace =
       match KeyMap.find_opt key_tuple km with
@@ -1247,10 +1312,13 @@ let build_msg (ctx : Context.t) ?warn q ?msg v =
       | None -> true
     in
     if should_replace
-    then
-      msg_acc :=
-        StringMap.add field_name (KeyMap.add key_tuple (schema, sm) km) !msg_acc
-  in
+    then StringMap.add field_name (KeyMap.add key_tuple (schema, sm) km) msg
+    else msg
+;;
+
+let build_msg (ctx : Context.t) ?warn q ?msg v =
+  let msg_acc = ref (Option.value ~default:(make_msg ()) msg) in
+  let add_to_msg r = msg_acc := msg_add !msg_acc r in
   let is_selected sel k =
     (sel.star && not (StringSet.mem k sel.excludes))
     || StringSet.mem k sel.includes

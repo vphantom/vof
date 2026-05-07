@@ -18,7 +18,7 @@ As of this version, the final encoding and decoding is left to the caller and th
 ## Implementation Notes
 
 * We use native `int` integers, which means that we cannot I/O full 64-bit.  Good compromise for business applications, not for things like IPv4 or truncated UUID values.
-* There is no `Reader.enum` helper, since in OCaml those are variants anyway.  Instead, `Reader.variant` accepts enums gracefully.
+* There is no `Read.enum` helper, since in OCaml those are variants anyway.  Instead, `Read.variant` accepts enums gracefully.
 * We use options for error management, since it's impractical to refer to locations of errors in source data.
 
 ## Coding Style
@@ -56,3 +56,72 @@ For hot-path flow control where bubbling a result value is impractical, use `rai
 #### Return Values
 
 When it is expected that a function may not return its normal result in production, use `option`.  When there is useful information to pass along in the error case, use `result` instead.
+
+## Application Example
+
+```ocaml
+(* order.ml *)
+
+open Vof
+
+module Line = struct
+  type t
+  let schema = ...
+
+  (* Add to [?warn] before returning None, if necessary. *)
+  let of_vof ctx ?warn v = ...
+
+  let sm_key sm =
+    let| v = StringMap.find_opt "i" sm in
+    Read.uint v
+  ;;
+end
+
+type t
+
+let empty = { ... }
+let schema = ...
+
+let sm_key sm =
+  let| v = StringMap.find_opt "uid" sm in
+  Read.uint v
+;;
+
+let db_get db uid = ...
+
+let db_put db o =
+  (* NOTE: we rely on db_get offering key/t caching to tolerate this dual call *)
+  let orig = db_get db o.uid in
+  match o.uid, orig with
+  | 0, _ -> (* Generate key; INSERT all *)
+  | uid, None -> (* INSERT all *)
+  | _, Some orig -> (* UPDATE smartly *)
+;;
+
+let of_vof ctx ?db ?warn v =
+  let open Read in
+  let| sm = record ctx schema Option.some v in
+  let base =
+    let| db = db in
+    let| uid = sm_key sm in
+    db_get db uid |> Option.value ~default:empty
+  in
+  each_field ?warn (schema, sm) base @@ fun k v acc ->
+  match k with
+  (* Probably prevent modifying non-default UID here *)
+  | "uid" -> { acc with uid = field uint v }
+  (* Check timestamp compatibility *)
+  | "email" -> { acc with email = field string ~null:empty.email v }
+  | "total" -> { acc with total = field decimal ~null:empty.total v }
+  | "lines" -> (
+    let lines = children ctx Line.schema ?warn
+      ~of_vof:(Line.of_vof ctx ?warn)
+      ~key_of:(fun l -> l.i)
+      ~key_read:Line.sm_key
+      acc.lines v
+    in
+    { acc with lines = Option.value ~default:acc.lines lines }
+  )
+  | _ -> acc
+;;
+```

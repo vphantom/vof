@@ -155,7 +155,7 @@ Full example: `GET …/orders?user=12345&select~=id,ordered_on,grand_total,lines
 
 #### Row Filters
 
-* Format: `field[!]=[operator:]value[,value2…]`
+* Format: `field[!]=[operator:]value[:value2…]`
 * Appending '!' to a field name negates its operator, like `name!=has:Smith` selects all names which do _not_ include "Smith".
 * Filters are additive (all must be true).
 * Fields may be used more than once.
