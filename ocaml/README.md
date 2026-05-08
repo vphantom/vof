@@ -15,6 +15,12 @@ As of this version, the final encoding and decoding is left to the caller and th
 * `base64`
 * `ipaddr`
 
+Development dependencies add:
+
+* `alcotest`
+* `bisect-ppx`
+* `qcheck` and `qcheck-alcotest`
+
 ## Implementation Notes
 
 * We use native `int` integers, which means that we cannot I/O full 64-bit.  Good compromise for business applications, not for things like IPv4 or truncated UUID values.

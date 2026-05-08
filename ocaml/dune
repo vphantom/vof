@@ -3,17 +3,27 @@
  (wrapped false)
  (modules :standard \ vof_test)
  (private_modules vof_enc vof_lib)
- (libraries unix base64 ipaddr))
+ (libraries unix base64 ipaddr)
+ (instrumentation
+  (backend bisect_ppx)))
 
 (test
+ ; TODO:
+ ; To avoid having a Makefile I'd need to do the equivalent in here:
+ ; rm -fr _coverage
+ ; dune test --profile=dev --instrument-with bisect_ppx --force
+ ; bisect-ppx-report html
+ ; bisect-ppx-report summary
  (name vof_test)
  (modules vof_test)
- (libraries vof))
+ (libraries vof alcotest qcheck qcheck-alcotest))
 
 (env
  (default
   (ocamlopt_flags
    (:standard -O2)))
- (release
+ (coverage
+  (flags
+   (:standard -w -71))
   (ocamlopt_flags
-   (-O2 -ccopt -s -ccopt -flto -ccopt -Wl,--gc-sections))))
+   (:standard -O2))))
