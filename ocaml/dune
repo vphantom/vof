@@ -1,22 +1,23 @@
 (library
+ (name vof_lib)
+ (modules vof_lib)
+ (libraries unix)
+ (instrumentation
+  (backend bisect_ppx)))
+
+(library
  (name vof)
  (wrapped false)
- (modules :standard \ vof_test)
- (private_modules vof_enc vof_lib)
- (libraries unix base64 ipaddr)
+ (modules :standard \ vof_test vof_lib)
+ (private_modules vof_enc)
+ (libraries unix base64 ipaddr vof_lib)
  (instrumentation
   (backend bisect_ppx)))
 
 (test
- ; TODO:
- ; To avoid having a Makefile I'd need to do the equivalent in here:
- ; rm -fr _coverage
- ; dune test --profile=dev --instrument-with bisect_ppx --force
- ; bisect-ppx-report html
- ; bisect-ppx-report summary
  (name vof_test)
  (modules vof_test)
- (libraries vof alcotest qcheck qcheck-alcotest))
+ (libraries vof_lib vof alcotest qcheck qcheck-alcotest))
 
 (env
  (default

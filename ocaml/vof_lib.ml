@@ -167,7 +167,7 @@ module Datetime = struct
     let y = (i lsr 20) + 1900
     and m = (i lsr 16) land 15
     and d = (i lsr 11) land 31
-    and hh = (i lsr 6) land 63
+    and hh = (i lsr 6) land 31
     and mm = i land 63 in
     if m >= 1 && m <= 12 && d >= 1 && d <= 31 && hh <= 23 && mm <= 59
     then Some (y, m, d, hh, mm)
