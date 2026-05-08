@@ -21,12 +21,12 @@ Small integers are compressed at the slight expense of larger ones similarly to 
 |            | Gap (1..4)         | `< 248`   | Represents `c - 243` undefined values           |
 |            | String             | `== 248`  | Next is size in bytes, then as many UTF-8 bytes |
 |            | Data               | `== 249`  | Next is size in bytes, then as many raw bytes   |
-|            | List Open          | `== 250`  | Values until `List Close`                       |
-|            | List Close         | `== 251`  | Close nearest `List Open`                       |
-|            | Gap                | `== 252`  | Next Int is number of undefined values          |
-|            | Alt                | `== 253`  | Next value is in its alternate form, `Tag(-1)`  |
-|            | Tag                | `== 254`  | Next Int qualifies next value                   |
-|            | Null               |           |                                                 |
+|            | Null               | `== 250`  |                                                 |
+|            | Alt                | `== 251`  | Next value is in its alternate form, `Tag(-1)`  |
+|            | Tag                | `== 252`  | Next Int qualifies next value                   |
+|            | List Open          | `== 253`  | Values until `List Close`                       |
+|            | Gap                | `== 254`  | Next Int is number of undefined values          |
+|            | List Close         |           | Close nearest `List Open`                       |
 
 ### Canonical Encoding
 

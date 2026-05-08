@@ -181,6 +181,12 @@ val pp_warn : warning -> string
 
 (** {1 Decoding} *)
 
+type format = Gzip | Zstd | Json | Cbor | Binary
+
+(** [detect_format c] inspects the first byte of some input to determine its
+    wire format. Returns [None] for unrecognized input. *)
+val detect_format : char -> format option
+
 module Read : sig
   (** Schema-guided value interpretation.
 

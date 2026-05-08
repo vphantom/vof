@@ -41,7 +41,7 @@ let write_uint buf = function
 
 let[@inline] zigzag_encode i = (i asr (Sys.int_size - 1)) lxor (i lsl 1)
 let write_sint buf i = write_uint buf (zigzag_encode i)
-let write_null buf = add_byte buf 255
+let write_null buf = add_byte buf 250
 
 let write_float buf f =
   match Vof_float16.bits_of_float_opt f with
@@ -80,15 +80,15 @@ let write_gap buf n =
   then ()
   else if n <= 4
   then add_byte buf (243 + n)
-  else (add_byte buf 252; write_uint buf n)
+  else (add_byte buf 254; write_uint buf n)
 ;;
 
 let write_list_open buf n =
   if n < 0 then invalid_arg "Vof_bin.write_list_open: negative length";
-  if n <= 11 then add_byte buf (232 + n) else add_byte buf 250
+  if n <= 11 then add_byte buf (232 + n) else add_byte buf 253
 ;;
 
-let write_list_close buf n = if n > 11 then add_byte buf 251
+let write_list_close buf n = if n > 11 then add_byte buf 255
 
 let write_list f buf l =
   let rec len_upto n = function
@@ -105,7 +105,7 @@ let write_decimal buf d =
   let packed = Decimal.pack d in
   if packed >= 0
   then write_uint buf packed
-  else (add_byte buf 253; write_uint buf (-packed))
+  else (add_byte buf 251; write_uint buf (-packed))
 ;;
 
 let write_strmap f buf sm =
@@ -343,9 +343,14 @@ let decode ?(pos = 0) ?len src =
     | n when n < 244 -> Raw_list (List.init (c - 232) (fun _ -> item ()))
     | n when n < 248 -> Raw_gap (c - 243)
     | 248 | 249 -> Raw_bstr (slice (read_uint ()))
-    | 250 ->
+    | 250 -> Null
+    | 251 -> Raw_tag (-1, item ())
+    | 252 ->
+      let t = read_uint () in
+      Raw_tag (t, item ())
+    | 253 ->
       let[@tail_mod_cons] rec read_open () =
-        if peek () = 251
+        if peek () = 255
         then (incr p; [])
         else (
           let v = item () in
@@ -353,13 +358,8 @@ let decode ?(pos = 0) ?len src =
         )
       in
       Raw_list (read_open ())
-    | 251 -> raise_notrace Exit
-    | 252 -> Raw_gap (read_uint ())
-    | 253 -> Raw_tag (-1, item ())
-    | 254 ->
-      let t = read_uint () in
-      Raw_tag (t, item ())
-    | _ -> Null
+    | 254 -> Raw_gap (read_uint ())
+    | _ -> raise_notrace Exit
   in
   try Some (item (), !p) with Exit -> None
 ;;

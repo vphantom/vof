@@ -115,7 +115,7 @@ For example, a 3D array of size 2x2x2 could be: `[[2,2,2],1,2,3,4,5,6,7,8]`
 
 In CBOR, records are normal maps with uint keys.
 
-In VOF Binary, records are a list in which fields are positional (field ID 0 in first place, field ID 20 in 21st place, etc.)  Missing fields are replaced by spacers, CBOR Simple values stating how many missing values they represent.  Simple values 0..19 mean skip 1..20 fields, 128..255 mean to skip 21..148 fields.  Omit any trailing spacers when encoding, but tolerate them when decoding.  For example, a 16-field record with just `{ 0:1, 3:2, 9:3 }` becomes `[1,simple(1),2,simple(4),3]`
+In VOF Binary, records are a list in which fields are positional (field ID 0 in first place, field ID 20 in 21st place, etc.)  Missing fields are replaced by gap codes.  Omit any trailing spacers when encoding, but tolerate them when decoding.  For example, a 16-field record with just `{ 0:1, 3:2, 9:3 }` becomes `[1,gap(1),2,gap(4),3]`
 
 <!-- /advanced -->
 
@@ -405,15 +405,15 @@ Encoders can either pre-scan the full series to collect the possible record fiel
 
 ### Decoding and Compression
 
-Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceeding 100-200 bytes.  Decoders can always know the format of VOF data by inspecting the first few bytes:
+Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceeding 100-200 bytes.  Decoders can always know the format of VOF data by inspecting the first byte:
 
-| First byte(s)       | Unique meaning                |
-|---------------------|-------------------------------|
-| 0x1F 0x8B           | Gzip                          |
-| 0x28 0xB5 0x2F 0xFD | Zstd                          |
-| 0x5B or 0x7B        | JSON (array, object)          |
-| 0x80-0xDF           | CBOR (array, map, tag, magic) |
-| 0xEB-0xFF           | VOF Binary (non-numeric)      |
+| First byte      | Unique meaning                      |
+|-----------------|-------------------------------------|
+| 0x1F            | Gzip                                |
+| 0x28            | Zstd                                |
+| 0x5B,6E,7B      | JSON (array, null, object)          |
+| 0x80-DB,F6      | CBOR (array, map, tag, magic, null) |
+| 0xE8..F3,FA..FD | Binary (list, alt, tag, null)       |
 
 ## Design Compromises
 

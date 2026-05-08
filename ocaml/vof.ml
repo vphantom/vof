@@ -352,6 +352,17 @@ let pp_warn = function
   | `Vof_unknown_param s -> Printf.sprintf "unknown parameter: %s" s
 ;;
 
+type format = Gzip | Zstd | Json | Cbor | Binary
+
+let detect_format = function
+  | '\x1F' -> Some Gzip
+  | '\x28' -> Some Zstd
+  | '\x5B' | '\x6E' | '\x7B' -> Some Json
+  | '\x80' .. '\xDB' | '\xF6' -> Some Cbor
+  | '\xE8' .. '\xF3' | '\xFA' .. '\xFD' -> Some Binary
+  | _ -> None
+;;
+
 let is_ref (schema, sm) =
   StringMap.for_all
     (fun k _ -> List.mem k schema.keys || List.mem k schema.required)
