@@ -66,7 +66,7 @@ open Vof
 
 module Line = struct
   type t
-  let schema = ...
+  let vof_schema = ...
 
   (* Add to [?warn] before returning None, if necessary. *)
   let of_vof ctx ?warn v = ...
@@ -80,7 +80,7 @@ end
 type t
 
 let empty = { ... }
-let schema = ...
+let vof_schema = ...
 
 let sm_key sm =
   let| v = StringMap.find_opt "uid" sm in
@@ -100,13 +100,13 @@ let db_put db o =
 
 let of_vof ctx ?db ?warn v =
   let open Read in
-  let| sm = record ctx schema Option.some v in
+  let| sm = record ctx vof_schema Option.some v in
   let base =
     let| db = db in
     let| uid = sm_key sm in
     db_get db uid |> Option.value ~default:empty
   in
-  each_field ?warn (schema, sm) base @@ fun k v acc ->
+  each_field ?warn (vof_schema, sm) base @@ fun k v acc ->
   match k with
   (* Probably prevent modifying non-default UID here *)
   | "uid" -> { acc with uid = field uint v }
@@ -114,7 +114,7 @@ let of_vof ctx ?db ?warn v =
   | "email" -> { acc with email = field string ~null:empty.email v }
   | "total" -> { acc with total = field decimal ~null:empty.total v }
   | "lines" -> (
-    let lines = children ctx Line.schema ?warn
+    let lines = children ctx Line.vof_schema ?warn
       ~of_vof:(Line.of_vof ctx ?warn)
       ~key_of:(fun l -> l.i)
       ~key_read:Line.sm_key

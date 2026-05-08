@@ -27,11 +27,13 @@ module StringSet : Set.S with type elt = string
 module StringMap : Map.S with type key = string
 module IntMap : Map.S with type key = int
 
-type schema = {
-  path: string;
+type schema = private {
+  path: string; (** Absolute namespace path (e.g. ["com.example.order"]). *)
   msg_field: string option;
-  keys: string list;
+    (** Field name in [$msg] for lists of this record type. *)
+  keys: string list; (** Field names forming the primary key. *)
   required: string list;
+    (** Fields always included alongside keys in references. *)
 }
 
 type decimal = int * int
@@ -130,16 +132,7 @@ module Context : sig
   (** [schema ctx ?msg_field ?keys ?required rel_path] declares or retrieves a
       schema for the namespace at [rel_path] (relative to the context root). If
       the namespace already exists and hints are provided, they are validated
-      (or updated in update mode).
-
-      [msg_field] is the name of the field in your [$msg] schema containing a
-      list of records of this type.
-
-      [keys] are lists of field names which combine to form a record's primary
-      key.
-
-      [required] are fields which should be included along with keys even in
-      references. *)
+      (or updated in update mode). *)
   val schema :
     t ->
     ?msg_field:string ->
