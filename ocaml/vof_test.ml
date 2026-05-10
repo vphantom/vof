@@ -1,6 +1,5 @@
 (** TODO:
 
-    - [Vof.Context] + [Vof.detect_format]
     - [Vof_json]
     - [Vof_cbor]
     - [Vof_bin]
@@ -15,6 +14,266 @@ module Ratio = Vof_lib.Ratio
 module Date = Vof_lib.Date
 module Datetime = Vof_lib.Datetime
 module Timestamp = Vof_lib.Timestamp
+
+(* === Core === *)
+
+let test_detect_format () =
+  (* Values from SPECIFICATION.md "Decoding and Compression" table *)
+  let cases =
+    [
+      '\x1F', Some Vof.Gzip;
+      '\x28', Some Vof.Zstd;
+      '\x5B', Some Vof.Json;
+      (* '[' *)
+      '\x6E', Some Vof.Json;
+      (* 'n' for null *)
+      '\x7B', Some Vof.Json;
+      (* '{' *)
+      '\x80', Some Vof.Cbor;
+      '\x9F', Some Vof.Cbor;
+      '\xA0', Some Vof.Cbor;
+      '\xBF', Some Vof.Cbor;
+      '\xD8', Some Vof.Cbor;
+      '\xD9', Some Vof.Cbor;
+      '\xDA', Some Vof.Cbor;
+      '\xDB', Some Vof.Cbor;
+      '\xF6', Some Vof.Cbor;
+      '\xE8', Some Vof.Binary;
+      '\xF3', Some Vof.Binary;
+      '\xFA', Some Vof.Binary;
+      '\xFD', Some Vof.Binary;
+      (* Unrecognized bytes *)
+      '\x00', None;
+      '\x20', None;
+      '\x41', None;
+      '\xFF', None;
+    ]
+  in
+  List.iter
+    (fun (c, expected) ->
+      let got = Vof.detect_format c in
+      if got <> expected
+      then
+        Alcotest.failf "detect_format 0x%02X: expected %s got %s" (Char.code c)
+          ( match expected with
+          | Some Vof.Gzip -> "Gzip"
+          | Some Vof.Zstd -> "Zstd"
+          | Some Vof.Json -> "Json"
+          | Some Vof.Cbor -> "Cbor"
+          | Some Vof.Binary -> "Binary"
+          | None -> "None"
+          )
+          ( match got with
+          | Some Vof.Gzip -> "Gzip"
+          | Some Vof.Zstd -> "Zstd"
+          | Some Vof.Json -> "Json"
+          | Some Vof.Cbor -> "Cbor"
+          | Some Vof.Binary -> "Binary"
+          | None -> "None"
+          )
+    )
+    cases
+;;
+
+(* === Context === *)
+
+let test_context_make () =
+  (* Basic creation succeeds *)
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  (* Can declare a schema immediately *)
+  let _s = Vof.Context.schema ctx "order" in
+  ()
+;;
+
+let test_context_schema_basic () =
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  let _ =
+    Vof.Context.schema ctx
+      ~fields:[ "orders", [ List_of "com.test.order" ] ]
+      "$msg"
+  in
+  let order_schema =
+    Vof.Context.schema ctx
+      ~fields:[ "id", [ Key ]; "modified_at", [ Req ] ]
+      "order"
+  in
+  Alcotest.(check string) "path" "com.test.order" order_schema.path;
+  Alcotest.(check (list string)) "keys" [ "id" ] order_schema.keys;
+  Alcotest.(check (list string)) "required" [ "modified_at" ] order_schema.reqs
+;;
+
+let test_context_schema_retrieval () =
+  (* Second call with same path returns same schema *)
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  let s1 = Vof.Context.schema ctx ~fields:[ "id", [ Key ] ] "order" in
+  let s2 = Vof.Context.schema ctx "order" in
+  Alcotest.(check string) "same path" s1.path s2.path;
+  Alcotest.(check (list string)) "same keys" s1.keys s2.keys
+;;
+
+let test_context_schema_nested () =
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  let s = Vof.Context.schema ctx ~fields:[ "i", [ Key ] ] "order.line" in
+  Alcotest.(check string) "nested path" "com.test.order.line" s.path
+;;
+
+let test_context_lookup_id () =
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  let _s = Vof.Context.schema ctx "order" in
+  (* First symbol gets id 0, second gets 1, etc. *)
+  let id0 = Vof.Context.lookup_id ctx "com.test.order" "id" in
+  let id1 = Vof.Context.lookup_id ctx "com.test.order" "modified_at" in
+  let id2 = Vof.Context.lookup_id ctx "com.test.order" "customer" in
+  Alcotest.(check int) "first symbol" 0 id0;
+  Alcotest.(check int) "second symbol" 1 id1;
+  Alcotest.(check int) "third symbol" 2 id2;
+  (* Repeated lookup returns same id *)
+  let id0' = Vof.Context.lookup_id ctx "com.test.order" "id" in
+  Alcotest.(check int) "same id on repeat" 0 id0'
+;;
+
+let test_context_idx_sym () =
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  let _s = Vof.Context.schema ctx "order" in
+  let idx = Vof.Context.lookup ctx "com.test.order" in
+  let _id = Vof.Context.idx_id ctx idx "alpha" in
+  let _id = Vof.Context.idx_id ctx idx "beta" in
+  Alcotest.(check (option string))
+    "sym 0" (Some "alpha")
+    (Vof.Context.idx_sym idx 0);
+  Alcotest.(check (option string))
+    "sym 1" (Some "beta")
+    (Vof.Context.idx_sym idx 1);
+  Alcotest.(check (option string)) "sym 99" None (Vof.Context.idx_sym idx 99)
+;;
+
+let tmp_symtable () =
+  let path = Filename.temp_file "vof_test_symtable" ".txt" in
+  at_exit (fun () -> try Sys.remove path with _ -> ());
+  path
+;;
+
+let test_context_no_update_rejects_unknown () =
+  let path = tmp_symtable () in
+  (* Set up a namespace with one known field *)
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  Vof.Context.load ctx path;
+  let _ = Vof.Context.schema ctx ~fields:[ "id", [ Key ] ] "order" in
+  let _ = Vof.Context.lookup_id ctx "com.test.order" "id" in
+  Vof.Context.save ctx;
+  (* Now load into a non-update context *)
+  let ctx2 = Vof.Context.make ~update:false "com.test" in
+  Vof.Context.load ctx2 path;
+  let raised =
+    match Vof.Context.lookup_id ctx2 "com.test.order" "new_field" with
+    | _ -> false
+    | exception Invalid_argument _ -> true
+  in
+  if not raised
+  then
+    Alcotest.fail
+      "expected Invalid_argument for unknown symbol in no-update mode"
+;;
+
+let test_context_save_load () =
+  let path = tmp_symtable () in
+  (* Create, populate, save *)
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  Vof.Context.load ctx path;
+  let _ =
+    Vof.Context.schema ctx
+      ~fields:[ "orders", [ List_of "com.test.order" ] ]
+      "$msg"
+  in
+  let _s =
+    Vof.Context.schema ctx
+      ~fields:[ "id", [ Key ]; "modified_at", [ Req ] ]
+      "order"
+  in
+  let _ = Vof.Context.lookup_id ctx "com.test.order" "id" in
+  let _ = Vof.Context.lookup_id ctx "com.test.order" "modified_at" in
+  let _ = Vof.Context.lookup_id ctx "com.test.order" "customer" in
+  let _s = Vof.Context.schema ctx ~fields:[ "i", [ Key ] ] "order.line" in
+  let _ = Vof.Context.lookup_id ctx "com.test.order.line" "i" in
+  let _ = Vof.Context.lookup_id ctx "com.test.order.line" "product" in
+  Vof.Context.save ctx;
+  (* Load into a fresh context and verify *)
+  let ctx2 = Vof.Context.make ~update:false "com.test" in
+  Vof.Context.load ctx2 path;
+  let id0 = Vof.Context.lookup_id ctx2 "com.test.order" "id" in
+  let id1 = Vof.Context.lookup_id ctx2 "com.test.order" "modified_at" in
+  let id2 = Vof.Context.lookup_id ctx2 "com.test.order" "customer" in
+  Alcotest.(check int) "loaded id" 0 id0;
+  Alcotest.(check int) "loaded modified_at" 1 id1;
+  Alcotest.(check int) "loaded customer" 2 id2;
+  let li0 = Vof.Context.lookup_id ctx2 "com.test.order.line" "i" in
+  let li1 = Vof.Context.lookup_id ctx2 "com.test.order.line" "product" in
+  Alcotest.(check int) "loaded line i" 0 li0;
+  Alcotest.(check int) "loaded line product" 1 li1
+;;
+
+let test_context_save_load_qualifiers () =
+  let path = tmp_symtable () in
+  (* Verify qualifiers (key, req) survive save/load *)
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  Vof.Context.load ctx path;
+  let _s =
+    Vof.Context.schema ctx
+      ~fields:[ "id", [ Key ]; "modified_at", [ Req ]; "data", [] ]
+      "thing"
+  in
+  let _ = Vof.Context.lookup_id ctx "com.test.thing" "id" in
+  let _ = Vof.Context.lookup_id ctx "com.test.thing" "modified_at" in
+  let _ = Vof.Context.lookup_id ctx "com.test.thing" "data" in
+  Vof.Context.save ctx;
+  (* Read the file and check qualifier strings are present *)
+  let contents =
+    let ic = open_in path in
+    let s = In_channel.input_all ic in
+    close_in ic; s
+  in
+  let has sub =
+    String.length contents > 0
+    &&
+    let re = sub in
+    let rec check i =
+      if i > String.length contents - String.length re
+      then false
+      else if String.sub contents i (String.length re) = re
+      then true
+      else check (i + 1)
+    in
+    check 0
+  in
+  if not (has "\tid key")
+  then
+    Alcotest.failf "expected 'id key' qualifier in saved file, got:\n%s"
+      contents;
+  if not (has "\tmodified_at req")
+  then
+    Alcotest.failf
+      "expected 'modified_at req' qualifier in saved file, got:\n%s" contents;
+  (* 'data' should have no qualifier *)
+  if has "\tdata key" || has "\tdata req"
+  then
+    Alcotest.failf "unexpected qualifier on 'data' in saved file, got:\n%s"
+      contents
+;;
+
+let test_context_load_nonexistent_update () =
+  (* In update mode, loading a non-existent file should not fail *)
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  let path =
+    "/tmp/vof_test_nonexistent_" ^ string_of_int (Random.bits ()) ^ ".txt"
+  in
+  (try Sys.remove path with _ -> ());
+  (* Should not raise *)
+  Vof.Context.load ctx path;
+  (* Context should still be usable *)
+  let _s = Vof.Context.schema ctx "foo" in
+  let _ = Vof.Context.lookup_id ctx "com.test.foo" "bar" in
+  ()
+;;
 
 let pow10 n =
   let rec go acc = function
@@ -1109,6 +1368,24 @@ let test_timestamp_offset () =
 let () =
   Alcotest.run "vof"
     [
+      "Core", [ Alcotest.test_case "detect_format" `Quick test_detect_format ];
+      ( "Context",
+        [
+          Alcotest.test_case "make" `Quick test_context_make;
+          Alcotest.test_case "schema basic" `Quick test_context_schema_basic;
+          Alcotest.test_case "schema retrieval" `Quick
+            test_context_schema_retrieval;
+          Alcotest.test_case "schema nested" `Quick test_context_schema_nested;
+          Alcotest.test_case "lookup_id" `Quick test_context_lookup_id;
+          Alcotest.test_case "idx_sym" `Quick test_context_idx_sym;
+          Alcotest.test_case "no-update rejects unknown" `Quick
+            test_context_no_update_rejects_unknown;
+          Alcotest.test_case "save/load roundtrip" `Quick test_context_save_load;
+          Alcotest.test_case "save/load qualifiers" `Quick
+            test_context_save_load_qualifiers;
+          Alcotest.test_case "load nonexistent in update mode" `Quick
+            test_context_load_nonexistent_update;
+        ] );
       ( "Float16",
         [
           Alcotest.test_case "roundtrip all 64K values" `Quick test_float16_conv;

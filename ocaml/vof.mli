@@ -27,14 +27,13 @@ module StringSet : Set.S with type elt = string
 module StringMap : Map.S with type key = string
 module IntMap : Map.S with type key = int
 
-type schema = private {
-  path: string; (** Absolute namespace path (e.g. ["com.example.order"]). *)
-  msg_field: string option;
-    (** Field name in [$msg] for lists of this record type. *)
-  keys: string list; (** Field names forming the primary key. *)
-  required: string list;
-    (** Fields always included alongside keys in references. *)
-}
+type schema = private { path: string; keys: string list; reqs: string list }
+
+type field_qual =
+  | Key
+  | Req
+  | List_of of string
+  | Other of string * string option
 
 type decimal = int * int
 type ratio = int * int
@@ -129,17 +128,11 @@ module Context : sig
       Requires [update] mode. No-op if nothing was modified since loading. *)
   val save : t -> unit
 
-  (** [schema ctx ?msg_field ?keys ?required rel_path] declares or retrieves a
-      schema for the namespace at [rel_path] (relative to the context root). If
-      the namespace already exists and hints are provided, they are validated
-      (or updated in update mode). *)
-  val schema :
-    t ->
-    ?msg_field:string ->
-    ?keys:string list ->
-    ?required:string list ->
-    string ->
-    schema
+  (** [schema ctx ?fields rel_path] declares or retrieves a schema for the
+      namespace at [rel_path] (relative to the context root). If the namespace
+      already exists and field qualifiers are provided, they are validated (or
+      updated in update mode). *)
+  val schema : t -> ?fields:(string * field_qual list) list -> string -> schema
 
   (** [add_fetchers ctx fl] registers record fetchers keyed by namespace path,
       used for expanding references. *)
@@ -150,7 +143,7 @@ module Context : sig
   val lookup : t -> string -> index
 
   (** [lookup_id ctx path sym] returns the integer id for symbol [sym] in the
-      namespace at [path]. *)
+      namespace at [path], auto-registering in update mode. *)
   val lookup_id : t -> string -> string -> int
 
   (** [idx_id ctx idx sym] returns the integer id for symbol [sym] in [idx],
@@ -382,10 +375,11 @@ type msg
 (** [make_msg ()] creates a fresh empty message accumulator. *)
 val make_msg : unit -> msg
 
-(** [msg_add msg r] adds record [r] to [msg] unfiltered. Duplicate records
-    preserve the one with the most fields set. Raises [Invalid_argument] if the
-    record's schema has no [msg_field]. *)
-val msg_add : msg -> record -> msg
+(** [msg_add ctx msg r] adds record [r] to [msg] unfiltered in context [ctx].
+    Duplicate records preserve the one with the most fields set. Raises
+    [Invalid_argument] if there is no field in your context's [$msg] declared to
+    hold records with [r]'s path. *)
+val msg_add : Context.t -> msg -> record -> msg
 
 (** [build_msg ctx q ?msg v] Create/update [?msg] by processing record, series
     or record list [v] with query [q] in context [ctx], returning the

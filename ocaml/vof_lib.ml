@@ -1,4 +1,9 @@
 let ( let| ) = Option.bind
+let die fn fmt = Printf.ksprintf failwith ("Vof_lib." ^^ fn ^^ ": " ^^ fmt)
+
+let die_arg fn fmt =
+  Printf.ksprintf invalid_arg ("Vof_lib." ^^ fn ^^ ": " ^^ fmt)
+;;
 
 module Decimal = struct
   let[@inline] optimize (value, dec) =
@@ -21,7 +26,7 @@ module Decimal = struct
     | 7 -> ((value * 100) lsl 2) lor 3
     | 8 -> ((value * 10) lsl 2) lor 3
     | 9 -> (value lsl 2) lor 3
-    | _ -> invalid_arg "Vof.Decimal.pack: unsupported decimal places"
+    | _ -> die_arg "Decimal.pack" "unsupported decimal places"
   ;;
 
   let unpack n =
@@ -31,12 +36,12 @@ module Decimal = struct
     | 1 -> optimize (value, 2)
     | 2 -> optimize (value, 4)
     | 3 -> optimize (value, 9)
-    | _ -> failwith "Vof.Decimal.unpack: impossible"
+    | _ -> die "Decimal.unpack" "impossible"
   ;;
 
   let to_n (value, dec) =
     if dec < 0 || dec > 9
-    then invalid_arg "Vof.Decimal.to_n: unsupported decimal places";
+    then die_arg "Decimal.to_n" "unsupported decimal places";
     let value, dec = optimize (value, dec) in
     if value < 0 then (value * 10) - dec else (value * 10) + dec
   ;;
@@ -100,7 +105,7 @@ module Decimal = struct
     | 7 -> build 10000000
     | 8 -> build 100000000
     | 9 -> build 1000000000
-    | _ -> invalid_arg "Decimal.to_string: unsupported decimal places"
+    | _ -> die_arg "Decimal.to_string" "unsupported decimal places"
   ;;
 end
 

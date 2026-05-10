@@ -82,6 +82,10 @@ Symbol tables are simple 7-bit ASCII files listing symbols in field order and ar
 ```
 # VOF Symbol Table
 
+com.example.$msg
+    orders list:com.example.orders
+    ; ... custom fields
+
 com.example.order
 	id key
 	modified_at req
@@ -100,8 +104,11 @@ In the above example, symbol 'customer' in namespace 'com.example.order' is ID `
 
 #### Symbol Qualifiers
 
+Qualifiers may be simple tags or "key:value" pairs.
+
 * **key** — In records, tags a field as being part of the primary key.
 * **req** — In record references, tags a field to always include along with keys.
+* **list:** — In the `$msg` namespace in your root path, tags fields which intended as lists of records with their full path.  When reading, if multiple symbols are declared as lists of the same path, the last one prevails.
 
 Readers should quietly ignore unknown qualifiers, however they should preserve them when updating the file.
 

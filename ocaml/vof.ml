@@ -5,16 +5,19 @@ module IntMap = Map.Make (Int)
 
 let ( let- ) v f = Option.iter f v
 let ( let| ) = Option.bind
+let die fn fmt = Printf.ksprintf failwith ("Vof." ^^ fn ^^ ": " ^^ fmt)
+let die_arg fn fmt = Printf.ksprintf invalid_arg ("Vof." ^^ fn ^^ ": " ^^ fmt)
 
 exception Vof_return
 exception Vof_bad_field
 
-type schema = {
-  path: string;
-  msg_field: string option;
-  keys: string list;
-  required: string list;
-}
+type schema = { path: string; keys: string list; reqs: string list }
+
+and field_qual =
+  | Key
+  | Req
+  | List_of of string
+  | Other of string * string option
 
 let both_opt = function
   | Some a, Some b -> Some (a, b)
@@ -89,13 +92,22 @@ type t =
 and record = schema * t StringMap.t
 
 module Context = struct
+  type field = {
+    symbol: string;
+    mutable is_key: bool;
+    mutable is_req: bool;
+    mutable list_of: string option;
+    mutable other: string option StringMap.t;
+  }
+
   type index = {
     mutable sym_ids: int StringMap.t;
     mutable id_syms: string array;
-    mutable qualifiers: StringSet.t StringMap.t;
     mutable ns_qualifiers: StringSet.t;
+    mutable fields: field StringMap.t;
     mutable keys: string list;
-    mutable required: string list;
+    mutable reqs: string list;
+    mutable lists: string StringMap.t;
   }
 
   type t = {
@@ -114,24 +126,40 @@ module Context = struct
     ctx.fetchers <- List.fold_left add ctx.fetchers fl
   ;;
 
-  let idx_make () =
+  let field_make symbol =
     {
-      sym_ids = StringMap.empty;
-      id_syms = [||];
-      qualifiers = StringMap.empty;
-      ns_qualifiers = StringSet.empty;
-      keys = [];
-      required = [];
+      symbol;
+      is_key = false;
+      is_req = false;
+      list_of = None;
+      other = StringMap.empty;
     }
+  ;;
+
+  let idx_make ctx path =
+    let idx =
+      {
+        sym_ids = StringMap.empty;
+        id_syms = [||];
+        ns_qualifiers = StringSet.empty;
+        fields = StringMap.empty;
+        keys = [];
+        reqs = [];
+        lists = StringMap.empty;
+      }
+    in
+    ctx.registry <- StringMap.add path idx ctx.registry;
+    idx
   ;;
 
   let idx_id ctx idx s =
     match ctx.update, StringMap.find_opt s idx.sym_ids with
-    | false, None -> invalid_arg ("Vof.Context.idx_id: unknown symbol " ^ s)
+    | false, None -> die_arg "Context.idx_id" "unknown symbol %s" s
     | true, None ->
       let id = Array.length idx.id_syms in
       idx.id_syms <- Array.append idx.id_syms [| s |];
       idx.sym_ids <- StringMap.add s id idx.sym_ids;
+      idx.fields <- StringMap.add s (field_make s) idx.fields;
       ctx.modified <- true;
       id
     | _, Some id -> id
@@ -143,58 +171,114 @@ module Context = struct
     else Some (Array.unsafe_get idx.id_syms id)
   ;;
 
-  let schema ctx ?msg_field ?keys ?required rel_path =
-    let path = ctx.root ^ "." ^ rel_path in
-    let validate_ctx idx ks rs =
-      let sort = List.sort String.compare in
-      if sort idx.keys <> sort ks
-      then invalid_arg ("Vof.Context.schema: keys mismatch for " ^ path);
-      if sort idx.required <> sort rs
-      then invalid_arg ("Vof.Context.schema: required mismatch for " ^ path)
-    in
-    let update_ctx idx ks rs =
-      let update_qual sym qual_str should_have =
-        let _ = idx_id ctx idx sym in
-        let update = if should_have then StringSet.add else StringSet.remove in
-        let quals =
-          StringMap.find_opt sym idx.qualifiers
-          |> Option.value ~default:StringSet.empty
-          |> update qual_str
-          |> fun qs -> StringMap.add sym qs idx.qualifiers
-        in
-        idx.qualifiers <- quals
+  let add_schema ctx ?fields path =
+    let field_of_fql symbol fql =
+      let is_key = ref false in
+      let is_req = ref false in
+      let list_of = ref None in
+      let other = ref StringMap.empty in
+      let each = function
+        | Key -> is_key := true
+        | Req -> is_req := true
+        | List_of s -> list_of := Some s
+        | Other (k, v) -> other := StringMap.add k v !other
       in
-      if idx.keys <> ks || idx.required <> rs
-      then (
-        List.iter (fun s -> update_qual s "key" false) idx.keys;
-        List.iter (fun s -> update_qual s "key" true) ks;
-        List.iter (fun s -> update_qual s "req" false) idx.required;
-        List.iter (fun s -> update_qual s "req" true) rs;
-        idx.keys <- ks;
-        idx.required <- rs;
-        ctx.modified <- true
-      )
+      List.iter each fql;
+      {
+        symbol;
+        is_key = !is_key;
+        is_req = !is_req;
+        list_of = !list_of;
+        other = !other;
+      }
     in
-    let idx_opt = StringMap.find_opt path ctx.registry in
-    let have_hints = keys <> None || required <> None in
-    match idx_opt, have_hints with
-    | None, false ->
-      invalid_arg ("Vof.Context.schema: unknown namespace " ^ path)
-    | Some idx, false ->
-      { path; msg_field; keys = idx.keys; required = idx.required }
-    | None, true ->
-      let idx = idx_make () in
-      let ks = Option.value ~default:[] keys in
-      let rs = Option.value ~default:[] required in
-      idx.keys <- ks;
-      idx.required <- rs;
-      ctx.registry <- StringMap.add path idx ctx.registry;
-      { path; msg_field; keys = ks; required = rs }
-    | Some idx, true ->
-      let ks = Option.value ~default:idx.keys keys in
-      let rs = Option.value ~default:idx.required required in
-      if ctx.update then update_ctx idx ks rs else validate_ctx idx ks rs;
-      { path; msg_field; keys = ks; required = rs }
+    let validate_ctx idx fs =
+      let each (name, fql) =
+        let field = field_of_fql name fql in
+        match StringMap.find_opt name idx.fields with
+        | None -> die_arg "Context.schema" "unknown field %s" name
+        | Some orig ->
+          if orig.is_key <> field.is_key
+          then die_arg "Context.schema" "is_key mismatch for %s" name;
+          if orig.is_req <> field.is_req
+          then die_arg "Context.schema" "is_req mismatch for  %s" name;
+          if orig.list_of <> field.list_of
+          then die_arg "Context.schema" "list_of mismatch for %s" name
+      in
+      List.iter each fs
+    in
+    let update_ctx idx fs =
+      let changed = ref false in
+      idx.keys <- [];
+      idx.reqs <- [];
+      let new_names = ref StringSet.empty in
+      let update_one (name, fql) =
+        new_names := StringSet.add name !new_names;
+        let f_new = field_of_fql name fql in
+        if f_new.is_key then idx.keys <- idx.keys @ [ name ];
+        if f_new.is_req then idx.reqs <- idx.reqs @ [ name ];
+        match StringMap.find_opt name idx.fields with
+        | None ->
+          idx_id ctx idx name |> ignore;
+          idx.fields <- StringMap.add name f_new idx.fields
+        | Some f_old ->
+          if f_new.is_key <> f_old.is_key
+          then (
+            changed := true;
+            f_old.is_key <- f_new.is_key
+          );
+          if f_new.is_req <> f_old.is_req
+          then (
+            changed := true;
+            f_old.is_req <- f_new.is_req
+          );
+          if f_new.list_of <> f_old.list_of
+          then (
+            changed := true;
+            f_old.list_of <- f_new.list_of;
+            ( match f_old.list_of with
+            | None -> ()
+            | Some s -> idx.lists <- StringMap.remove s idx.lists
+            );
+            match f_new.list_of with
+            | None -> ()
+            | Some s -> idx.lists <- StringMap.add s name idx.lists
+          );
+          let update_other s o =
+            match StringMap.find_opt s f_new.other with
+            | Some o' when o = o' -> ()
+            | _ ->
+              changed := true;
+              f_old.other <- StringMap.add s o f_old.other
+          in
+          StringMap.iter update_other f_new.other
+      in
+      let update_kr name f =
+        if not (StringSet.mem name !new_names)
+        then (
+          f.is_key <- false;
+          f.is_req <- false
+        )
+      in
+      List.iter update_one fs;
+      StringMap.iter update_kr idx.fields;
+      if !changed then ctx.modified <- true
+    in
+    let schema_of_idx idx = { path; keys = idx.keys; reqs = idx.reqs } in
+    match StringMap.find_opt path ctx.registry, fields, ctx.update with
+    | None, None, false -> die_arg "Context.schema" "unknown namespace %s" path
+    | None, None, true -> idx_make ctx path |> schema_of_idx
+    | None, Some _, false -> die_arg "Context.schema" "updates forbidden"
+    | None, Some fs, true ->
+      let idx = idx_make ctx path in
+      update_ctx idx fs; schema_of_idx idx
+    | Some idx, None, _ -> schema_of_idx idx
+    | Some idx, Some fs, false -> validate_ctx idx fs; schema_of_idx idx
+    | Some idx, Some fs, true -> update_ctx idx fs; schema_of_idx idx
+  ;;
+
+  let schema ctx ?fields rel_path =
+    add_schema ctx ?fields (ctx.root ^ "." ^ rel_path)
   ;;
 
   let make ?(update = false) root =
@@ -209,9 +293,8 @@ module Context = struct
   ;;
 
   let add ctx path =
-    if not ctx.update then invalid_arg "Vof.Context.add: not in update mode";
-    let idx = idx_make () in
-    ctx.registry <- StringMap.add path idx ctx.registry;
+    if not ctx.update then die_arg "Context.add" "not in update mode";
+    let idx = idx_make ctx path in
     idx
   ;;
 
@@ -230,8 +313,7 @@ module Context = struct
     match StringMap.find_opt path ctx.registry with
     | Some idx -> idx
     | None ->
-      let idx = idx_make () in
-      ctx.registry <- StringMap.add path idx ctx.registry;
+      let idx = idx_make ctx path in
       idx
   ;;
 
@@ -252,7 +334,7 @@ module Context = struct
 
   let load ctx path =
     if not (StringMap.is_empty ctx.registry)
-    then invalid_arg "Vof.Context.load: registry must be empty";
+    then die_arg "Context.load" "registry must be empty";
     ctx.file <- Some path;
     let contents =
       if ctx.update && not (Sys.file_exists path)
@@ -269,16 +351,27 @@ module Context = struct
         let- idx = !current_idx in
         let id = StringMap.cardinal idx.sym_ids in
         if StringMap.mem symbol idx.sym_ids
-        then invalid_arg "Vof.Context.load: duplicate symbol";
+        then die_arg "Context.load" "duplicate symbol";
         idx.sym_ids <- StringMap.add symbol id idx.sym_ids;
-        let qual_set = StringSet.of_list quals in
-        idx.qualifiers <- StringMap.add symbol qual_set idx.qualifiers;
-        if StringSet.mem "key" qual_set then idx.keys <- idx.keys @ [ symbol ];
-        if StringSet.mem "req" qual_set
-        then idx.required <- idx.required @ [ symbol ]
+        let field = field_make symbol in
+        let parse_qual q =
+          match String.split_on_char ':' q with
+          | [ "key" ] -> field.is_key <- true
+          | [ "req" ] -> field.is_req <- true
+          | [ "list"; v ] ->
+            field.list_of <- Some v;
+            idx.lists <- StringMap.add v symbol idx.lists
+          | [ k; v ] -> field.other <- StringMap.add k (Some v) field.other
+          | [ k ] -> field.other <- StringMap.add k None field.other
+          | _ -> die_arg "Context.load" "malformed qualifier %s" q
+        in
+        List.iter parse_qual quals;
+        idx.fields <- StringMap.add symbol field idx.fields;
+        if field.is_key then idx.keys <- idx.keys @ [ symbol ];
+        if field.is_req then idx.reqs <- idx.reqs @ [ symbol ]
       | path :: quals ->
         if not (String.starts_with ~prefix path)
-        then invalid_arg ("Vof.Context.load: unexpected path " ^ path);
+        then die_arg "Context.load" "unexpected path %s" path;
         let idx = lookup_create ctx path in
         idx.ns_qualifiers <- StringSet.of_list quals;
         current_idx := Some idx
@@ -293,10 +386,10 @@ module Context = struct
   ;;
 
   let save ctx =
-    if not ctx.update then invalid_arg "Vof.Context.save: not in update mode";
+    if not ctx.update then die_arg "Context.save" "not in update mode";
     match ctx.modified, ctx.file with
     | false, _ -> ()
-    | true, None -> invalid_arg "Vof.Context.save: no file path set"
+    | true, None -> die_arg "Context.save" "no file path set"
     | true, Some path ->
       let buf = Buffer.create 1024 in
       Buffer.add_string buf "# VOF Symbol Table\n";
@@ -310,9 +403,26 @@ module Context = struct
         let each_sym sym =
           Buffer.add_char buf '\t';
           Buffer.add_string buf sym;
-          StringMap.find_opt sym idx.qualifiers
-          |> Option.value ~default:StringSet.empty
-          |> StringSet.iter Buffer.(fun q -> add_char buf ' '; add_string buf q);
+          ( match StringMap.find_opt sym idx.fields with
+          | None -> die_arg "Context.save" "missing field %s" sym
+          | Some field ->
+            let open Buffer in
+            let write_kv k v =
+              add_char buf ' ';
+              add_string buf k;
+              add_char buf ':';
+              add_string buf v
+            in
+            let write_qual k vo =
+              add_char buf ' ';
+              add_string buf k;
+              Option.iter (fun v -> add_char buf ':'; add_string buf v) vo
+            in
+            if field.is_key then add_string buf " key";
+            if field.is_req then add_string buf " req";
+            Option.iter (write_kv "list") field.list_of;
+            StringMap.iter write_qual field.other
+          );
           Buffer.add_char buf '\n'
         in
         Array.iter each_sym idx.id_syms
@@ -365,7 +475,7 @@ let detect_format = function
 
 let is_ref (schema, sm) =
   StringMap.for_all
-    (fun k _ -> List.mem k schema.keys || List.mem k schema.required)
+    (fun k _ -> List.mem k schema.keys || List.mem k schema.reqs)
     sm
 ;;
 
@@ -960,10 +1070,10 @@ and pp_ref (schema, sm) =
       first fields
   in
   let first = add_values true schema.keys in
-  if schema.required <> []
+  if schema.reqs <> []
   then (
     Buffer.add_char buf ';';
-    ignore (add_values first schema.required)
+    ignore (add_values first schema.reqs)
   );
   if not (is_ref (schema, sm)) then Buffer.add_string buf ";...";
   Buffer.add_char buf ')';
@@ -1047,10 +1157,10 @@ and diff_record_list old_list new_list =
   let schema =
     match old_list @ new_list with
     | (s, _) :: _ -> s
-    | _ -> failwith "Vof.diff_record_list: empty list"
+    | _ -> die "diff_record_list" "empty list"
   in
   let keys = schema.keys in
-  if keys = [] then invalid_arg "Vof.diff_record_list: schema without keys";
+  if keys = [] then die_arg "diff_record_list" "schema without keys";
   let key_of sm = List.map (fun k -> StringMap.find k sm) keys in
   let restrict_to_keys sm =
     List.fold_left
@@ -1297,7 +1407,7 @@ let make_query ?warn params =
 ;;
 
 let make_ref (schema, sm) =
-  let keep k _ = List.mem k schema.keys || List.mem k schema.required in
+  let keep k _ = List.mem k schema.keys || List.mem k schema.reqs in
   schema, StringMap.filter keep sm
 ;;
 
@@ -1305,9 +1415,10 @@ type msg = record KeyMap.t StringMap.t
 
 let make_msg () = StringMap.empty
 
-let msg_add msg (schema, sm) =
-  match schema.msg_field with
-  | None -> invalid_arg ("Vof.msg_add: no msg_field for " ^ schema.path)
+let msg_add ctx msg (schema, sm) =
+  let msg_idx = Context.lookup ctx (ctx.root ^ ".$msg") in
+  match StringMap.find_opt schema.path msg_idx.lists with
+  | None -> die_arg "msg_add" "no $msg field for %s" schema.path
   | Some field_name ->
     let key_tuple =
       List.map
@@ -1329,7 +1440,7 @@ let msg_add msg (schema, sm) =
 
 let build_msg (ctx : Context.t) ?warn q ?msg v =
   let msg_acc = ref (Option.value ~default:(make_msg ()) msg) in
-  let add_to_msg r = msg_acc := msg_add !msg_acc r in
+  let add_to_msg r = msg_acc := msg_add ctx !msg_acc r in
   let is_selected sel k =
     (sel.star && not (StringSet.mem k sel.excludes))
     || StringSet.mem k sel.includes

@@ -2,13 +2,17 @@ open Vof
 open Vof_enc
 open Vof_lib
 
+let die_arg fn fmt =
+  Printf.ksprintf invalid_arg ("Vof_bin." ^^ fn ^^ ": " ^^ fmt)
+;;
+
 let[@inline] add_byte buf n = Buffer.add_char buf (Char.chr (n land 0xFF))
 let[@inline] add_le16 buf n = Buffer.add_uint16_le buf n
 let[@inline] add_le32 buf n = Buffer.add_int32_le buf (Int32.of_int n)
 let[@inline] add_le64 buf n = Buffer.add_int64_le buf (Int64.of_int n)
 
 let write_uint buf = function
-  | n when n < 0 -> invalid_arg "Vof_bin.write_uint: negative argument"
+  | n when n < 0 -> die_arg "write_uint" "negative argument"
   | n when n < 0x80 -> add_byte buf n
   | n when n < 0x4000 ->
     add_byte buf (n land 0x3F lor 0x80);
@@ -84,7 +88,7 @@ let write_gap buf n =
 ;;
 
 let write_list_open buf n =
-  if n < 0 then invalid_arg "Vof_bin.write_list_open: negative length";
+  if n < 0 then die_arg "write_list_open" "negative length";
   if n <= 11 then add_byte buf (232 + n) else add_byte buf 253
 ;;
 
@@ -237,7 +241,7 @@ let rec encode_val ctx buf = function
     in
     List.iter write_record rl; write_list_close buf len
   | Raw_gap g -> write_gap buf g
-  | _ -> invalid_arg "Vof_bin.encode_val: raw types cannot be converted"
+  | _ -> die_arg "encode_val" "raw types cannot be converted"
 ;;
 
 let encode_buf ctx ?(buf = Buffer.create 256) v = encode_val ctx buf v; buf
@@ -250,7 +254,7 @@ let encode_str ctx v =
 let decode ?(pos = 0) ?len src =
   let len = Option.value len ~default:(String.length src - pos) in
   if pos < 0 || len <= 0 || pos + len > String.length src
-  then invalid_arg "Vof_bin.decode: out of range";
+  then die_arg "decode" "out of range";
   let limit = pos + len in
   let raw = Bytes.unsafe_of_string src in
   let p = ref pos in
