@@ -135,7 +135,7 @@ let test_context_lookup_id () =
 let test_context_idx_sym () =
   let ctx = Vof.Context.make ~update:true "com.test" in
   let _s = Vof.Context.schema ctx "order" in
-  let idx = Vof.Context.lookup ctx "com.test.order" in
+  let idx = Vof.Context.idx_lookup ctx "com.test.order" in
   let _id = Vof.Context.idx_id ctx idx "alpha" in
   let _id = Vof.Context.idx_id ctx idx "beta" in
   Alcotest.(check (option string))

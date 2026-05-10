@@ -116,6 +116,7 @@ module Context = struct
     mutable file: string option;
     root: string;
     mutable registry: index StringMap.t;
+    mutable msg_idx: index option;
     mutable fetchers: (record -> (record, string) result) StringMap.t;
   }
 
@@ -149,6 +150,7 @@ module Context = struct
       }
     in
     ctx.registry <- StringMap.add path idx ctx.registry;
+    if path = ctx.root ^ "$msg" then ctx.msg_idx <- Some idx;
     idx
   ;;
 
@@ -288,6 +290,7 @@ module Context = struct
       file = None;
       root;
       registry = StringMap.empty;
+      msg_idx = None;
       fetchers = StringMap.empty;
     }
   ;;
@@ -298,14 +301,14 @@ module Context = struct
     idx
   ;;
 
-  let lookup ctx path =
+  let idx_lookup ctx path =
     match StringMap.find_opt path ctx.registry with
     | None -> add ctx path
     | Some idx -> idx
   ;;
 
   let lookup_id ctx path s =
-    let idx = lookup ctx path in
+    let idx = idx_lookup ctx path in
     idx_id ctx idx s
   ;;
 
@@ -820,7 +823,7 @@ module Read = struct
 
   let variant ctx schema f v =
     let enum v =
-      let idx = Context.lookup ctx schema.path in
+      let idx = Context.idx_lookup ctx schema.path in
       match v with
       | Raw_bint n | Raw_tint n | Raw_int n | Int n | Uint n ->
         Context.idx_sym idx n
@@ -872,7 +875,7 @@ module Read = struct
       in
       pairs StringMap.empty l
     | Raw_blist l ->
-      let idx = Context.lookup ctx schema.path in
+      let idx = Context.idx_lookup ctx schema.path in
       let rec pairs sm = function
         | [] -> f sm
         | k :: v :: rest -> (
@@ -885,7 +888,7 @@ module Read = struct
       in
       pairs StringMap.empty l
     | Raw_list l ->
-      let idx = Context.lookup ctx schema.path in
+      let idx = Context.idx_lookup ctx schema.path in
       let rec next pos sm = function
         | [] -> f sm
         | Raw_gap n :: rest -> next (pos + n) sm rest
@@ -960,7 +963,7 @@ module Read = struct
     )
     | Raw_blist (fields :: rows) ->
       let| ids = list uint fields in
-      let idx = Context.lookup ctx schema.path in
+      let idx = Context.idx_lookup ctx schema.path in
       let names = List.filter_map (Context.idx_sym idx) ids in
       let build_row = function
         | Raw_blist vals -> stringmap_zip StringMap.empty names vals |> f
@@ -972,7 +975,7 @@ module Read = struct
       then Some []
       else (try Some (map_some build_row rows) with Vof_return -> None)
     | Raw_list (fields :: values) ->
-      let idx = Context.lookup ctx schema.path in
+      let idx = Context.idx_lookup ctx schema.path in
       let| ids = list uint fields in
       let names = List.filter_map (Context.idx_sym idx) ids in
       let remaining = ref values in
@@ -1415,8 +1418,12 @@ type msg = record KeyMap.t StringMap.t
 
 let make_msg () = StringMap.empty
 
-let msg_add ctx msg (schema, sm) =
-  let msg_idx = Context.lookup ctx (ctx.root ^ ".$msg") in
+let msg_add (ctx : Context.t) msg (schema, sm) =
+  let msg_idx =
+    match ctx.msg_idx with
+    | None -> die_arg "msg_add" "missing $msg schema"
+    | Some i -> i
+  in
   match StringMap.find_opt schema.path msg_idx.lists with
   | None -> die_arg "msg_add" "no $msg field for %s" schema.path
   | Some field_name ->

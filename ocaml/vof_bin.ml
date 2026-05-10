@@ -211,7 +211,7 @@ let rec encode_val ctx buf = function
     List.iter (encode_val ctx buf) l;
     write_list_close buf len
   | Record (schema, sm) ->
-    let idx = Context.lookup ctx schema.path in
+    let idx = Context.idx_lookup ctx schema.path in
     let index_map k v acc = IntMap.add (Context.idx_id ctx idx k) v acc in
     let im = StringMap.fold index_map sm IntMap.empty in
     let last = ref (-1) in

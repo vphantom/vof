@@ -105,7 +105,7 @@ module Context : sig
       When [update] mode is enabled, encountering unknown symbols auto-registers
       them. Otherwise, unknown symbols raise [Invalid_argument]. *)
 
-  (** Opaque index for a single namespace (one schema path). *)
+  (** Index for a single namespace (one schema path). *)
   type index
 
   (** Mutable context holding the full registry of namespaces. *)
@@ -138,13 +138,13 @@ module Context : sig
       used for expanding references. *)
   val add_fetchers : t -> fetcher list -> unit
 
-  (** [lookup ctx path] returns the index for the absolute namespace [path],
-      creating one if in update mode. *)
-  val lookup : t -> string -> index
-
   (** [lookup_id ctx path sym] returns the integer id for symbol [sym] in the
       namespace at [path], auto-registering in update mode. *)
   val lookup_id : t -> string -> string -> int
+
+  (** [idx_lookup ctx path] returns the index for the absolute namespace [path],
+      creating one if in update mode. *)
+  val idx_lookup : t -> string -> index
 
   (** [idx_id ctx idx sym] returns the integer id for symbol [sym] in [idx],
       auto-registering in update mode. *)
