@@ -591,6 +591,7 @@ module Read = struct
     | Raw_bint n -> Decimal.of_n n
     | Raw_int d -> Some (Decimal.unpack d)
     | Raw_tint i -> Some (Decimal.optimize (i, 2))
+    | Raw_tag (-1, Raw_int n) -> Some (Decimal.unpack (-n))
     | Raw_bstr s | Raw_tstr s | String s ->
       let len = String.length s in
       if len > 1 && s.[len - 1] = '%'

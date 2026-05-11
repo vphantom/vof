@@ -1396,11 +1396,14 @@ let make_test_ctx () =
           "created_ts", [];
           "duration", [];
           "weight", [];
+          "weight32", [];
           "split", [];
           "discount", [];
           "price", [];
           "sales_tax", [];
           "local_tax", [];
+          "neg_price", [];
+          "neg_tax", [];
           "qty", [];
           "sku", [];
           "lang", [];
@@ -1421,6 +1424,18 @@ let make_test_ctx () =
           "payment", [];
           "lines", [];
           "addresses", [];
+          (* Large uint coverage (5 Binary encoding size classes) *)
+          "bigint1", [];
+          "bigint2", [];
+          "bigint3", [];
+          "bigint4", [];
+          "bigint5", [];
+          (* Binary gap coverage: skip1, there1, skip2+skip3, there2 *)
+          "gap_skip1", [];
+          "gap_there1", [];
+          "gap_skip2", [];
+          "gap_skip3", [];
+          "gap_there2", [];
         ]
       "order"
   in
@@ -1537,11 +1552,14 @@ let make_test_t
         |> StringMap.add "duration"
              (Timespan { hmonths = 4; days = 3; secs = 0 })
         |> StringMap.add "weight" (Float 3.14)
+        |> StringMap.add "weight32" (Float 100000.0)
         |> StringMap.add "split" (Ratio (1, 3))
-        |> StringMap.add "discount" (Percent (10, 0))
+        |> StringMap.add "discount" (Percent (-10, 0))
         |> StringMap.add "price" (Amount ((9999, 2), Some "USD"))
         |> StringMap.add "sales_tax" (Tax ((750, 2), "US_ST", Some "USD"))
         |> StringMap.add "local_tax" (Tax ((125, 2), "CA_QC_QST", None))
+        |> StringMap.add "neg_price" (Amount ((-500, 2), Some "USD"))
+        |> StringMap.add "neg_tax" (Tax ((-75, 2), "CA_QC_QST", None))
         |> StringMap.add "qty" (Quantity ((5, 0), Some "EA"))
         |> StringMap.add "sku" (Code "ABC_123")
         |> StringMap.add "lang" (Language "en")
@@ -1585,6 +1603,15 @@ let make_test_t
                   Record (address_schema, StringMap.add "id" (Uint 2) sm);
                 ]
              )
+        (* Large uints: one per Binary encoding size class *)
+        |> StringMap.add "bigint1" (Uint 0x900_0000)
+        |> StringMap.add "bigint2" (Uint 0x2_0000_0000)
+        |> StringMap.add "bigint3" (Uint 0x200_0000_0000)
+        |> StringMap.add "bigint4" (Uint 0x2_0000_0000_0000)
+        |> StringMap.add "bigint5" (Uint 0x200_0000_0000_0000)
+        (* Gap fields: gap_skip1/skip2/skip3 left unset *)
+        |> StringMap.add "gap_there1" (Uint 23)
+        |> StringMap.add "gap_there2" (Uint 42)
       )
   in
   let make_sales_row d orders revenue tax items avg =
@@ -1694,10 +1721,12 @@ let test_of_vof ctx
   then Alcotest.fail "duration mismatch";
   let w = require "weight" (Read.float (get "weight" o)) in
   if w <> 3.14 then Alcotest.fail "weight mismatch";
+  let w32 = require "weight32" (Read.float (get "weight32" o)) in
+  if w32 <> 100000.0 then Alcotest.fail "weight32 mismatch";
   let r = require "split" (Read.ratio (get "split" o)) in
   if r <> (1, 3) then Alcotest.fail "split mismatch";
   let pct = require "discount" (Read.percent (get "discount" o)) in
-  if pct <> (10, 0) then Alcotest.fail "discount mismatch";
+  if pct <> (-10, 0) then Alcotest.fail "discount mismatch";
   let amt = require "price" (Read.amount (get "price" o)) in
   if amt <> ((9999, 2), Some "USD") then Alcotest.fail "price mismatch";
   let tax = require "sales_tax" (Read.tax (get "sales_tax" o)) in
@@ -1706,6 +1735,11 @@ let test_of_vof ctx
   let local_tax = require "local_tax" (Read.tax (get "local_tax" o)) in
   if local_tax <> ((125, 2), "CA_QC_QST", None)
   then Alcotest.fail "local_tax mismatch";
+  let neg_price = require "neg_price" (Read.amount (get "neg_price" o)) in
+  if neg_price <> ((-5, 0), Some "USD") then Alcotest.fail "neg_price mismatch";
+  let neg_tax = require "neg_tax" (Read.tax (get "neg_tax" o)) in
+  if neg_tax <> ((-75, 2), "CA_QC_QST", None)
+  then Alcotest.fail "neg_tax mismatch";
   let qty = require "qty" (Read.quantity (get "qty" o)) in
   if qty <> ((5, 0), Some "EA") then Alcotest.fail "qty mismatch";
   let code = require "sku" (Read.code (get "sku" o)) in
@@ -1814,6 +1848,15 @@ let test_of_vof ctx
   | [ a1; a2 ] -> chk_uint "id" 1 a1; chk_uint "id" 2 a2
   | _ -> Alcotest.failf "expected 2 order addr refs, got %d" (List.length oaddrs)
   );
+  (* --- Large uints (Binary encoding size classes) --- *)
+  chk_uint "bigint1" 0x900_0000 o;
+  chk_uint "bigint2" 0x2_0000_0000 o;
+  chk_uint "bigint3" 0x200_0000_0000 o;
+  chk_uint "bigint4" 0x2_0000_0000_0000 o;
+  chk_uint "bigint5" 0x200_0000_0000_0000 o;
+  (* --- Gap fields (Binary positional gap codes) --- *)
+  chk_uint "gap_there1" 23 o;
+  chk_uint "gap_there2" 42 o;
   (* --- $msg Addresses --- *)
   let addrs =
     require "msg.addresses"
