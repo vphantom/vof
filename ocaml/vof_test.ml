@@ -1400,6 +1400,7 @@ let make_test_ctx () =
           "discount", [];
           "price", [];
           "sales_tax", [];
+          "local_tax", [];
           "qty", [];
           "sku", [];
           "lang", [];
@@ -1484,7 +1485,7 @@ let make_test_t
         sm
         |> StringMap.add "i" (Uint 1)
         |> StringMap.add "product" (String "Widget")
-        |> StringMap.add "qty" (Decimal (10, 0))
+        |> StringMap.add "qty" (Quantity ((10, 0), None))
         |> StringMap.add "unit_price" (Decimal (599, 2))
       )
   in
@@ -1494,7 +1495,7 @@ let make_test_t
         sm
         |> StringMap.add "i" (Uint 2)
         |> StringMap.add "product" (String "Gadget")
-        |> StringMap.add "qty" (Decimal (3, 0))
+        |> StringMap.add "qty" (Quantity ((3, 0), None))
         |> StringMap.add "unit_price" (Decimal (1299, 2))
       )
   in
@@ -1526,7 +1527,7 @@ let make_test_t
         |> StringMap.add "modified_at" (Timestamp 1750800000)
         |> StringMap.add "name" (String "Test Order")
         |> StringMap.add "active" (Bool true)
-        |> StringMap.add "total" (Decimal (12350, 2))
+        |> StringMap.add "total" (Amount ((12350, 2), None))
         |> StringMap.add "ordered_on" (Date { year = 2025; month = 6; day = 15 })
         |> StringMap.add "shipped_at"
              (Datetime
@@ -1540,6 +1541,7 @@ let make_test_t
         |> StringMap.add "discount" (Percent (10, 0))
         |> StringMap.add "price" (Amount ((9999, 2), Some "USD"))
         |> StringMap.add "sales_tax" (Tax ((750, 2), "US_ST", Some "USD"))
+        |> StringMap.add "local_tax" (Tax ((125, 2), "CA_QC_QST", None))
         |> StringMap.add "qty" (Quantity ((5, 0), Some "EA"))
         |> StringMap.add "sku" (Code "ABC_123")
         |> StringMap.add "lang" (Language "en")
@@ -1568,7 +1570,7 @@ let make_test_t
              (Uintmap
                 (IntMap.empty
                 |> IntMap.add 1 (Int 100)
-                |> IntMap.add 2 (Int 200)
+                |> IntMap.add 2 (Int (-200))
                 )
              )
         |> StringMap.add "flags" (List [ Bool true; Bool false; Bool true ])
@@ -1676,7 +1678,8 @@ let test_of_vof ctx
   chk_str "name" "Test Order" o;
   let active = require "active" (Read.bool (get "active" o)) in
   if active <> true then Alcotest.fail "active: expected true";
-  chk_dec "total" (1235, 1) o;
+  let amt = require "total" (Read.amount (get "total" o)) in
+  if amt <> ((1235, 1), None) then Alcotest.fail "total mismatch";
   let d = require "ordered_on" (Read.date (get "ordered_on" o)) in
   if d <> { year = 2025; month = 6; day = 15 }
   then Alcotest.fail "ordered_on mismatch";
@@ -1700,6 +1703,9 @@ let test_of_vof ctx
   let tax = require "sales_tax" (Read.tax (get "sales_tax" o)) in
   if tax <> ((75, 1), "US_ST", Some "USD")
   then Alcotest.fail "sales_tax mismatch";
+  let local_tax = require "local_tax" (Read.tax (get "local_tax" o)) in
+  if local_tax <> ((125, 2), "CA_QC_QST", None)
+  then Alcotest.fail "local_tax mismatch";
   let qty = require "qty" (Read.quantity (get "qty" o)) in
   if qty <> ((5, 0), Some "EA") then Alcotest.fail "qty mismatch";
   let code = require "sku" (Read.code (get "sku" o)) in
@@ -1748,7 +1754,7 @@ let test_of_vof ctx
   let s1 = require "scores[1]" (IntMap.find_opt 1 scores) in
   if s1 <> 100 then Alcotest.failf "scores[1]: expected 100 got %d" s1;
   let s2 = require "scores[2]" (IntMap.find_opt 2 scores) in
-  if s2 <> 200 then Alcotest.failf "scores[2]: expected 200 got %d" s2;
+  if s2 <> -200 then Alcotest.failf "scores[2]: expected -200 got %d" s2;
   (* List of bools *)
   let flags = require "flags" (Read.list Read.bool (get "flags" o)) in
   if flags <> [ true; false; true ] then Alcotest.fail "flags mismatch";
@@ -1786,11 +1792,13 @@ let test_of_vof ctx
   | [ l1; l2 ] ->
     chk_uint "i" 1 l1;
     chk_str "product" "Widget" l1;
-    chk_dec "qty" (10, 0) l1;
+    let qty = require "qty" (Read.quantity (get "qty" l1)) in
+    if qty <> ((10, 0), None) then Alcotest.fail "l1 qty mismatch";
     chk_dec "unit_price" (599, 2) l1;
     chk_uint "i" 2 l2;
     chk_str "product" "Gadget" l2;
-    chk_dec "qty" (3, 0) l2;
+    let qty = require "qty" (Read.quantity (get "qty" l2)) in
+    if qty <> ((3, 0), None) then Alcotest.fail "l1 qty mismatch";
     chk_dec "unit_price" (1299, 2) l2
   | _ -> Alcotest.failf "expected 2 lines, got %d" (List.length lines)
   );
@@ -1874,6 +1882,63 @@ let test_codec_base () =
   test_of_vof ctx schemas v
 ;;
 
+let test_json_large_int () =
+  let open Vof in
+  let ctx = Context.make ~update:true "com.test.li" in
+  (* Normal integer: should encode as JSON `Int *)
+  let normal = Uint 42 in
+  let j_normal = Vof_json.of_vof ctx normal in
+  ( match j_normal with
+  | `Int 42 -> ()
+  | `Int n -> Alcotest.failf "normal: expected `Int 42, got `Int %d" n
+  | `String s -> Alcotest.failf "normal: expected `Int 42, got `String %S" s
+  | _ -> Alcotest.fail "normal: unexpected JSON form"
+  );
+  let decoded_normal = Read.uint (Vof_json.to_raw j_normal) in
+  ( match decoded_normal with
+  | Some 42 -> ()
+  | Some n -> Alcotest.failf "normal roundtrip: expected 42 got %d" n
+  | None -> Alcotest.fail "normal roundtrip: Read.uint returned None"
+  );
+  (* Large unsigned beyond MAX_SAFE_INTEGER: should encode as JSON `String *)
+  let big = 9_007_199_254_740_992 in
+  let large = Uint big in
+  let j_large = Vof_json.of_vof ctx large in
+  ( match j_large with
+  | `String s ->
+    if s <> string_of_int big
+    then
+      Alcotest.failf "large uint: expected `String %S, got `String %S"
+        (string_of_int big) s
+  | `Int n -> Alcotest.failf "large uint: expected `String, got `Int %d" n
+  | _ -> Alcotest.fail "large uint: unexpected JSON form"
+  );
+  let decoded_large = Read.uint (Vof_json.to_raw j_large) in
+  ( match decoded_large with
+  | Some n when n = big -> ()
+  | Some n -> Alcotest.failf "large uint roundtrip: expected %d got %d" big n
+  | None -> Alcotest.fail "large uint roundtrip: Read.uint returned None"
+  );
+  (* Large negative beyond -MAX_SAFE_INTEGER: should encode as JSON `String *)
+  let neg_big = -9_007_199_254_740_992 in
+  let large_neg = Int neg_big in
+  let j_neg = Vof_json.of_vof ctx large_neg in
+  ( match j_neg with
+  | `String s ->
+    if s <> string_of_int neg_big
+    then
+      Alcotest.failf "large neg: expected `String %S, got `String %S"
+        (string_of_int neg_big) s
+  | `Int n -> Alcotest.failf "large neg: expected `String, got `Int %d" n
+  | _ -> Alcotest.fail "large neg: unexpected JSON form"
+  );
+  let decoded_neg = Read.int (Vof_json.to_raw j_neg) in
+  match decoded_neg with
+  | Some n when n = neg_big -> ()
+  | Some n -> Alcotest.failf "large neg roundtrip: expected %d got %d" neg_big n
+  | None -> Alcotest.fail "large neg roundtrip: Read.int returned None"
+;;
+
 let test_codec_json () =
   let ( (ctx, msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s) as
         all
@@ -1919,6 +1984,109 @@ let test_codec_bin () =
     | None -> Alcotest.fail "Binary decode returned None"
   in
   test_of_vof ctx schemas decoded
+;;
+
+let test_codec_cbor_coverage () =
+  let open Vof in
+  let ctx = Context.make ~update:true "com.test.cborcov" in
+  let require msg = function
+    | None -> Alcotest.fail msg
+    | Some x -> x
+  in
+  (* 1. Float that encodes as 32-bit (not 16, not 64) *)
+  let f32_val = 100000.0 in
+  let enc = Vof_cbor.encode_str ctx (Float f32_val) in
+  (* First byte 0xFA = CBOR float32 *)
+  if String.length enc < 1 || Char.code enc.[0] <> 0xFA
+  then
+    Alcotest.failf "float32: expected CBOR float32 tag 0xFA, got 0x%02X"
+      (Char.code enc.[0]);
+  let dec, _ = require "float32 decode" (Vof_cbor.decode enc) in
+  let got = require "float32 read" (Read.float dec) in
+  if got <> f32_val
+  then Alcotest.failf "float32: expected %f got %f" f32_val got;
+  (* 2. List of 25 items (exercises CBOR array length >= 24) *)
+  let big_list = List (List.init 25 (fun i -> Int i)) in
+  let enc = Vof_cbor.encode_str ctx big_list in
+  let dec, _ = require "list25 decode" (Vof_cbor.decode enc) in
+  let got = require "list25 read" (Read.list Read.int dec) in
+  if List.length got <> 25
+  then Alcotest.failf "list25: expected 25 items, got %d" (List.length got);
+  List.iteri
+    (fun i v ->
+      if v <> i then Alcotest.failf "list25[%d]: expected %d got %d" i i v
+    )
+    got;
+  (* 3. Strmap of 25 pairs *)
+  let big_strmap =
+    Strmap
+      (List.init 25 (fun i -> Printf.sprintf "k%02d" i, Int i)
+      |> List.to_seq
+      |> StringMap.of_seq
+      )
+  in
+  let enc = Vof_cbor.encode_str ctx big_strmap in
+  let dec, _ = require "strmap25 decode" (Vof_cbor.decode enc) in
+  let got = require "strmap25 read" (Read.strmap Read.int dec) in
+  if StringMap.cardinal got <> 25
+  then
+    Alcotest.failf "strmap25: expected 25 pairs, got %d" (StringMap.cardinal got);
+  (* 4. Uintmap of 25 pairs *)
+  let big_uintmap =
+    Uintmap
+      (List.init 25 (fun i -> i, Int (i * 10)) |> List.to_seq |> IntMap.of_seq)
+  in
+  let enc = Vof_cbor.encode_str ctx big_uintmap in
+  let dec, _ = require "uintmap25 decode" (Vof_cbor.decode enc) in
+  let got = require "uintmap25 read" (Read.uintmap Read.int dec) in
+  if IntMap.cardinal got <> 25
+  then
+    Alcotest.failf "uintmap25: expected 25 pairs, got %d" (IntMap.cardinal got);
+  (* 5. 64-bit integer (value > 2^32) *)
+  let big_int_val = 5_000_000_000 in
+  let enc = Vof_cbor.encode_str ctx (Uint big_int_val) in
+  let dec, _ = require "uint64 decode" (Vof_cbor.decode enc) in
+  let got = require "uint64 read" (Read.uint dec) in
+  if got <> big_int_val
+  then Alcotest.failf "uint64: expected %d got %d" big_int_val got;
+  (* 6. Indefinite-length text string *)
+  let indef_text =
+    let b = Buffer.create 16 in
+    Buffer.add_char b '\x7F';
+    (* indefinite text start *)
+    Buffer.add_char b '\x63';
+    (* text chunk of length 3 *)
+    Buffer.add_string b "Hel";
+    Buffer.add_char b '\x62';
+    (* text chunk of length 2 *)
+    Buffer.add_string b "lo";
+    Buffer.add_char b '\xFF';
+    (* break *)
+    Buffer.contents b
+  in
+  let dec, _ = require "indef text decode" (Vof_cbor.decode indef_text) in
+  let got = require "indef text read" (Read.string dec) in
+  if got <> "Hello"
+  then Alcotest.failf "indef text: expected %S got %S" "Hello" got;
+  (* Indefinite-length byte string *)
+  let indef_bytes =
+    let b = Buffer.create 16 in
+    Buffer.add_char b '\x5F';
+    (* indefinite bytes start *)
+    Buffer.add_char b '\x43';
+    (* bytes chunk of length 3 *)
+    Buffer.add_string b "wor";
+    Buffer.add_char b '\x42';
+    (* bytes chunk of length 2 *)
+    Buffer.add_string b "ld";
+    Buffer.add_char b '\xFF';
+    (* break *)
+    Buffer.contents b
+  in
+  let dec, _ = require "indef bytes decode" (Vof_cbor.decode indef_bytes) in
+  let got = require "indef bytes read" (Read.data dec) in
+  if got <> Bytes.of_string "world"
+  then Alcotest.fail "indef bytes: expected \"world\""
 ;;
 
 let test_codec_cbor_magic () =
@@ -2144,11 +2312,16 @@ let () =
         ] );
       ( "Codec base",
         [ Alcotest.test_case "roundtrip typed" `Quick test_codec_base ] );
-      "JSON codec", [ Alcotest.test_case "roundtrip" `Quick test_codec_json ];
+      ( "JSON codec",
+        [
+          Alcotest.test_case "large int encoding" `Quick test_json_large_int;
+          Alcotest.test_case "roundtrip" `Quick test_codec_json;
+        ] );
       ( "CBOR codec",
         [
           Alcotest.test_case "roundtrip" `Quick test_codec_cbor;
           Alcotest.test_case "roundtrip with magic" `Quick test_codec_cbor_magic;
+          Alcotest.test_case "coverage edges" `Quick test_codec_cbor_coverage;
         ] );
       "Binary codec", [ Alcotest.test_case "roundtrip" `Quick test_codec_bin ];
       ( "Structural",

@@ -30,19 +30,19 @@ let write_head buf major n =
     Int64.of_int n |> add_be64 buf
 ;;
 
-let write_magic buf = add_be16 buf 0xD9D9; add_byte buf 0xF7
-let write_null buf = add_byte buf 0xF6
+let[@inline] write_magic buf = add_be16 buf 0xD9D9; add_byte buf 0xF7
+let[@inline] write_null buf = add_byte buf 0xF6
 
-let write_bool buf = function
+let[@inline] write_bool buf = function
   | true -> add_byte buf 0xF5
   | false -> add_byte buf 0xF4
 ;;
 
-let write_int buf i =
+let[@inline] write_int buf i =
   if i >= 0 then write_head buf 0 i else write_head buf 1 (-1 - i)
 ;;
 
-let write_uint buf i =
+let[@inline] write_uint buf i =
   if i < 0 then die_arg "write_uint" "negative argument";
   write_head buf 0 i
 ;;
@@ -70,30 +70,30 @@ let write_text buf s =
   Buffer.add_string buf s
 ;;
 
-let write_array_head buf l =
+let[@inline] write_array_head buf l =
   if l < 0 || l > 23 then die_arg "write_array_head" "out of range";
   write_head buf 4 l
 ;;
 
-let write_array_open buf l =
+let[@inline] write_array_open buf l =
   if l < 0 then die_arg "write_array_open" "negative length";
   if l < 24 then write_head buf 4 l else add_byte buf 0x9F
 ;;
 
-let write_array_close buf l = if l >= 24 then add_byte buf 0xFF
+let[@inline] write_array_close buf l = if l >= 24 then add_byte buf 0xFF
 
-let write_map_open buf l =
+let[@inline] write_map_open buf l =
   if l < 0 then die_arg "write_map_open" "negative length";
   if l < 24 then write_head buf 5 l else add_byte buf 0xBF
 ;;
 
-let write_map_close buf l = if l >= 24 then add_byte buf 0xFF
+let[@inline] write_map_close buf l = if l >= 24 then add_byte buf 0xFF
 
 let write_array f buf l =
   let len = List.length l in
-  if len <= 23 then write_head buf 4 len else add_byte buf 0x9F;
+  write_array_open buf len;
   List.iter (f buf) l;
-  if len > 23 then add_byte buf 0xFF
+  write_array_close buf len
 ;;
 
 let write_strmap f buf sm =

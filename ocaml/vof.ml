@@ -688,7 +688,7 @@ module Read = struct
   ;;
 
   let amount = function
-    | Amount (a, b) -> Some (a, b)
+    | Amount (a, b) -> Some (Decimal.optimize a, b)
     | d -> decimal_qual d
   ;;
 
