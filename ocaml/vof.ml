@@ -150,7 +150,7 @@ module Context = struct
       }
     in
     ctx.registry <- StringMap.add path idx ctx.registry;
-    if path = ctx.root ^ "$msg" then ctx.msg_idx <- Some idx;
+    if path = ctx.root ^ ".$msg" then ctx.msg_idx <- Some idx;
     idx
   ;;
 
@@ -220,9 +220,13 @@ module Context = struct
         if f_new.is_key then idx.keys <- idx.keys @ [ name ];
         if f_new.is_req then idx.reqs <- idx.reqs @ [ name ];
         match StringMap.find_opt name idx.fields with
-        | None ->
+        | None -> (
           idx_id ctx idx name |> ignore;
-          idx.fields <- StringMap.add name f_new idx.fields
+          idx.fields <- StringMap.add name f_new idx.fields;
+          match f_new.list_of with
+          | None -> ()
+          | Some s -> idx.lists <- StringMap.add s name idx.lists
+        )
         | Some f_old ->
           if f_new.is_key <> f_old.is_key
           then (

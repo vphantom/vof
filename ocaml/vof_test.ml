@@ -1,9 +1,3 @@
-(** TODO:
-
-    - [make_query]
-    - [build_msg], [msg_add], [msg_record]
-
-    /TODO *)
 
 module Decimal = Vof_lib.Decimal
 module Ratio = Vof_lib.Ratio
@@ -2894,6 +2888,675 @@ let test_diff_children_and_collections () =
   then Alcotest.fail "identical non-record list: flags should be omitted"
 ;;
 
+(* === Services: make_query, make_msg, msg_add, build_msg, msg_record === *)
+
+let test_services () =
+  let open Vof in
+  let require msg = function
+    | None -> Alcotest.fail msg
+    | Some x -> x
+  in
+  let ctx, msg_s, order_s, line_s, addr_s, _, _, _ = make_test_ctx () in
+  let sm = StringMap.empty in
+
+  (* ---- make_query: defaults ---- *)
+  let q = make_query [] in
+  Alcotest.(check bool) "default star" true q.select.star;
+  Alcotest.(check bool)
+    "default no excludes" true
+    (StringSet.is_empty q.select.excludes);
+  Alcotest.(check bool)
+    "default no includes" true
+    (StringSet.is_empty q.select.includes);
+  Alcotest.(check bool)
+    "default no expand" true
+    (StringMap.is_empty q.select.expand);
+  Alcotest.(check bool)
+    "default no attach" true
+    (StringMap.is_empty q.select.attach);
+  Alcotest.(check int) "default max" 100 q.max;
+  Alcotest.(check int) "default page" 1 q.page;
+  if q.filters <> [] then Alcotest.fail "default: no filters";
+  if not (StringSet.is_empty q.prune) then Alcotest.fail "default: no prune";
+
+  (* ---- make_query: max~ and page~ ---- *)
+  let q = make_query [ "max~", "25"; "page~", "3" ] in
+  Alcotest.(check int) "max" 25 q.max;
+  Alcotest.(check int) "page" 3 q.page;
+
+  (* ---- make_query: select~ with star + excludes ---- *)
+  let q = make_query [ "select~", "*,!payload,!coords" ] in
+  Alcotest.(check bool) "star+excl" true q.select.star;
+  if not (StringSet.mem "payload" q.select.excludes)
+  then Alcotest.fail "payload not excluded";
+  if not (StringSet.mem "coords" q.select.excludes)
+  then Alcotest.fail "coords not excluded";
+
+  (* ---- make_query: select~ with includes, expand, attach ---- *)
+  let q =
+    make_query
+      [
+        ( "select~",
+          "id,name,total,lines(i,product,qty),$addresses(id,street,city)" );
+      ]
+  in
+  Alcotest.(check bool) "sel: not star" false q.select.star;
+  if not (StringSet.mem "id" q.select.includes)
+  then Alcotest.fail "id not included";
+  if not (StringSet.mem "name" q.select.includes)
+  then Alcotest.fail "name not included";
+  if not (StringSet.mem "total" q.select.includes)
+  then Alcotest.fail "total not included";
+  let lsel =
+    require "lines in expand" (StringMap.find_opt "lines" q.select.expand)
+  in
+  if not (StringSet.mem "i" lsel.includes) then Alcotest.fail "lines: i";
+  if not (StringSet.mem "product" lsel.includes)
+  then Alcotest.fail "lines: product";
+  if not (StringSet.mem "qty" lsel.includes) then Alcotest.fail "lines: qty";
+  let asel =
+    require "addr in attach" (StringMap.find_opt "addresses" q.select.attach)
+  in
+  if not (StringSet.mem "id" asel.includes) then Alcotest.fail "addr: id";
+  if not (StringSet.mem "street" asel.includes)
+  then Alcotest.fail "addr: street";
+  if not (StringSet.mem "city" asel.includes) then Alcotest.fail "addr: city";
+
+  (* ---- make_query: all filter operators ---- *)
+  let q =
+    make_query
+      [
+        "name", "has:Test";
+        "id", "42";
+        "total", "gt:100";
+        "status!", "in:Draft:Cancelled";
+        "ordered_on", "between:20250601:20250630";
+        "price", "lt:50";
+        "qty", "lte:10";
+        "weight", "gte:1";
+        "prune~", "lines";
+      ]
+  in
+  if List.length q.filters < 8
+  then Alcotest.failf "expected >=8 filters, got %d" (List.length q.filters);
+  if not (StringSet.mem "lines" q.prune) then Alcotest.fail "lines not pruned";
+  let ff name = List.find_opt (fun f -> f.field_path = [ name ]) q.filters in
+  ( match ff "name" with
+  | Some f ->
+    if f.negate then Alcotest.fail "name: should not be negated";
+    ( match f.op with
+    | Has "Test" -> ()
+    | _ -> Alcotest.fail "name: expected Has"
+    )
+  | None -> Alcotest.fail "name: missing"
+  );
+  ( match ff "id" with
+  | Some f ->
+    ( match f.op with
+    | Eq "42" -> ()
+    | _ -> Alcotest.fail "id: expected Eq"
+    )
+  | None -> Alcotest.fail "id: missing"
+  );
+  ( match ff "total" with
+  | Some f ->
+    ( match f.op with
+    | Gt "100" -> ()
+    | _ -> Alcotest.fail "total: expected Gt"
+    )
+  | None -> Alcotest.fail "total: missing"
+  );
+  ( match ff "status" with
+  | Some f ->
+    if not f.negate then Alcotest.fail "status: should be negated";
+    ( match f.op with
+    | In [ "Draft"; "Cancelled" ] -> ()
+    | _ -> Alcotest.fail "status: expected In"
+    )
+  | None -> Alcotest.fail "status: missing"
+  );
+  ( match ff "ordered_on" with
+  | Some f ->
+    ( match f.op with
+    | Between ("20250601", "20250630") -> ()
+    | _ -> Alcotest.fail "ordered_on: expected Between"
+    )
+  | None -> Alcotest.fail "ordered_on: missing"
+  );
+  ( match ff "price" with
+  | Some f ->
+    ( match f.op with
+    | Lt "50" -> ()
+    | _ -> Alcotest.fail "price: expected Lt"
+    )
+  | None -> Alcotest.fail "price: missing"
+  );
+  ( match ff "qty" with
+  | Some f ->
+    ( match f.op with
+    | Lte "10" -> ()
+    | _ -> Alcotest.fail "qty: expected Lte"
+    )
+  | None -> Alcotest.fail "qty: missing"
+  );
+  ( match ff "weight" with
+  | Some f ->
+    ( match f.op with
+    | Gte "1" -> ()
+    | _ -> Alcotest.fail "weight: expected Gte"
+    )
+  | None -> Alcotest.fail "weight: missing"
+  );
+
+  (* ---- make_query: nested field path ---- *)
+  let q = make_query [ "lines.product", "has:Widget" ] in
+  ( match
+      List.find_opt
+        (fun f -> f.field_path = [ "lines"; "product" ])
+        q.filters
+    with
+  | Some f ->
+    ( match f.op with
+    | Has "Widget" -> ()
+    | _ -> Alcotest.fail "nested: expected Has"
+    )
+  | None -> Alcotest.fail "nested filter: missing"
+  );
+
+  (* ---- make_query: operator synonyms ---- *)
+  let q =
+    make_query
+      [
+        "a", "under:10";
+        "b", "upto:5";
+        "c", "over:3";
+        "d", "atleast:1";
+        "e", "before:X";
+        "f", "after:Y";
+      ]
+  in
+  let ff name = List.find_opt (fun f -> f.field_path = [ name ]) q.filters in
+  ( match ff "a" with
+  | Some f ->
+    ( match f.op with
+    | Lt "10" -> ()
+    | _ -> Alcotest.fail "under→Lt"
+    )
+  | None -> Alcotest.fail "a: missing"
+  );
+  ( match ff "b" with
+  | Some f ->
+    ( match f.op with
+    | Lte "5" -> ()
+    | _ -> Alcotest.fail "upto→Lte"
+    )
+  | None -> Alcotest.fail "b: missing"
+  );
+  ( match ff "c" with
+  | Some f ->
+    ( match f.op with
+    | Gt "3" -> ()
+    | _ -> Alcotest.fail "over→Gt"
+    )
+  | None -> Alcotest.fail "c: missing"
+  );
+  ( match ff "d" with
+  | Some f ->
+    ( match f.op with
+    | Gte "1" -> ()
+    | _ -> Alcotest.fail "atleast→Gte"
+    )
+  | None -> Alcotest.fail "d: missing"
+  );
+  ( match ff "e" with
+  | Some f ->
+    ( match f.op with
+    | Lt "X" -> ()
+    | _ -> Alcotest.fail "before→Lt"
+    )
+  | None -> Alcotest.fail "e: missing"
+  );
+  ( match ff "f" with
+  | Some f ->
+    ( match f.op with
+    | Gt "Y" -> ()
+    | _ -> Alcotest.fail "after→Gt"
+    )
+  | None -> Alcotest.fail "f: missing"
+  );
+
+  (* ---- make_query: warnings on bad input ---- *)
+  let warn = ref [] in
+  let q =
+    make_query ~warn [ "select~", "(((bad"; "max~", "abc"; "foo~", "bar" ]
+  in
+  Alcotest.(check bool) "bad select degrades to star" true q.select.star;
+  if List.length !warn = 0 then Alcotest.fail "expected warnings on bad input";
+
+  (* ---- msg_add: direct accumulation with dedup ---- *)
+  let full_addr1 =
+    ( addr_s,
+      sm
+      |> StringMap.add "id" (Uint 1)
+      |> StringMap.add "street" (String "123 Main St")
+      |> StringMap.add "city" (String "Montreal")
+      |> StringMap.add "zip" (String "H2X1A1") )
+  in
+  let full_addr2 =
+    ( addr_s,
+      sm
+      |> StringMap.add "id" (Uint 2)
+      |> StringMap.add "street" (String "456 Oak Ave")
+      |> StringMap.add "city" (String "Toronto")
+      |> StringMap.add "zip" (String "M5V2T6") )
+  in
+  let msg = make_msg () in
+  let msg = msg_add ctx msg full_addr1 in
+  let msg = msg_add ctx msg full_addr2 in
+  (* Add duplicate ref with fewer fields: full record should win *)
+  let msg = msg_add ctx msg (addr_s, StringMap.singleton "id" (Uint 1)) in
+  let _, mf = msg_record msg_s msg in
+  ( match StringMap.find_opt "addresses" mf with
+  | Some (List al) ->
+    Alcotest.(check int) "msg_add: 2 addrs" 2 (List.length al);
+    (* Find addr 1 and verify full record wins over ref *)
+    let a1 =
+      List.find_opt
+        (function
+          | Record (_, f) -> StringMap.find_opt "id" f = Some (Uint 1)
+          | _ -> false
+          )
+        al
+    in
+    ( match a1 with
+    | Some (Record (_, a1f)) ->
+      if not (StringMap.mem "street" a1f)
+      then Alcotest.fail "msg_add: full record should win over ref"
+    | _ -> Alcotest.fail "msg_add: addr 1 not found"
+    )
+  | Some _ -> Alcotest.fail "msg_add: addresses should be List"
+  | None -> Alcotest.fail "msg_add: addresses missing"
+  );
+
+  (* ---- build_msg with expand + attach ---- *)
+  Context.add_fetchers ctx
+    [
+      ( "com.test.address",
+        fun (_, fields) ->
+          match StringMap.find_opt "id" fields with
+          | Some (Uint 1) -> Ok full_addr1
+          | Some (Uint 2) -> Ok full_addr2
+          | _ -> Error "address not found" );
+    ];
+  let line1 =
+    Record
+      ( line_s,
+        sm
+        |> StringMap.add "i" (Uint 1)
+        |> StringMap.add "product" (String "Widget")
+        |> StringMap.add "qty" (Quantity ((10, 0), None))
+        |> StringMap.add "unit_price" (Decimal (599, 2)) )
+  in
+  let line2 =
+    Record
+      ( line_s,
+        sm
+        |> StringMap.add "i" (Uint 2)
+        |> StringMap.add "product" (String "Gadget")
+        |> StringMap.add "qty" (Quantity ((3, 0), None))
+        |> StringMap.add "unit_price" (Decimal (1299, 2)) )
+  in
+  let order =
+    Record
+      ( order_s,
+        sm
+        |> StringMap.add "id" (Uint 42)
+        |> StringMap.add "modified_at" (Timestamp 1750800000)
+        |> StringMap.add "name" (String "Test Order")
+        |> StringMap.add "active" (Bool true)
+        |> StringMap.add "total" (Amount ((12350, 2), None))
+        |> StringMap.add "lines" (List [ line1; line2 ])
+        |> StringMap.add "addresses"
+             (List
+                [
+                  Record (addr_s, StringMap.singleton "id" (Uint 1));
+                  Record (addr_s, StringMap.singleton "id" (Uint 2));
+                ]
+             ) )
+  in
+  let query =
+    make_query
+      [ "select~", "id,name,total,lines(i,product),$addresses(id,street)" ]
+  in
+  let msg = make_msg () in
+  let msg, filtered = build_msg ctx query ~msg order in
+
+  (* Verify filtered output: explicitly selected fields present *)
+  ( match filtered with
+  | Record (_, flds) ->
+    if not (StringMap.mem "id" flds)
+    then Alcotest.fail "filtered: missing id";
+    if not (StringMap.mem "name" flds)
+    then Alcotest.fail "filtered: missing name";
+    if not (StringMap.mem "total" flds)
+    then Alcotest.fail "filtered: missing total";
+    (* Non-selected fields absent *)
+    if StringMap.mem "active" flds
+    then Alcotest.fail "filtered: active should be absent";
+    (* Expanded lines: only i and product *)
+    ( match StringMap.find_opt "lines" flds with
+    | Some (List ll) ->
+      Alcotest.(check int) "filtered: 2 lines" 2 (List.length ll);
+      List.iter
+        (fun l ->
+          match l with
+          | Record (_, lf) ->
+            if not (StringMap.mem "i" lf)
+            then Alcotest.fail "filtered line: missing i";
+            if not (StringMap.mem "product" lf)
+            then Alcotest.fail "filtered line: missing product";
+            if StringMap.mem "unit_price" lf
+            then Alcotest.fail "filtered line: unit_price should be absent";
+            if StringMap.mem "qty" lf
+            then Alcotest.fail "filtered line: qty should be absent"
+          | _ -> Alcotest.fail "filtered line: expected Record"
+        )
+        ll
+    | _ -> Alcotest.fail "filtered: lines should be a List"
+    )
+  | _ -> Alcotest.fail "filtered: expected Record"
+  );
+
+  (* ---- msg_record: verify attached addresses with sub-selection ---- *)
+  let _, mf = msg_record msg_s msg in
+  ( match StringMap.find_opt "addresses" mf with
+  | Some (List al) ->
+    Alcotest.(check int) "msg: 2 addresses" 2 (List.length al);
+    List.iter
+      (fun a ->
+        match a with
+        | Record (_, af) ->
+          if not (StringMap.mem "id" af)
+          then Alcotest.fail "msg addr: missing id";
+          if not (StringMap.mem "street" af)
+          then Alcotest.fail "msg addr: missing street";
+          if StringMap.mem "city" af
+          then Alcotest.fail "msg addr: city should be absent";
+          if StringMap.mem "zip" af
+          then Alcotest.fail "msg addr: zip should be absent"
+        | _ -> Alcotest.fail "msg addr: expected Record"
+      )
+      al
+  | Some _ -> Alcotest.fail "msg: addresses should be List"
+  | None -> Alcotest.fail "msg: addresses missing"
+  );
+
+  (* ---- build_msg with list of records ---- *)
+  let order2 =
+    Record
+      ( order_s,
+        sm
+        |> StringMap.add "id" (Uint 99)
+        |> StringMap.add "modified_at" (Timestamp 1750900000)
+        |> StringMap.add "name" (String "Second Order")
+        |> StringMap.add "total" (Amount ((5000, 2), None))
+        |> StringMap.add "lines" (List [])
+        |> StringMap.add "addresses"
+             (List [ Record (addr_s, StringMap.singleton "id" (Uint 1)) ]) )
+  in
+  let query_star = make_query [ "select~", "*,$addresses" ] in
+  let msg2 = make_msg () in
+  let msg2, filtered2 = build_msg ctx query_star ~msg:msg2 (List [ order; order2 ]) in
+  ( match filtered2 with
+  | List fl ->
+    Alcotest.(check int) "list: 2 orders" 2 (List.length fl)
+  | _ -> Alcotest.fail "list: expected List"
+  );
+  (* Addresses de-duplicated in msg: addr 1 referenced by both orders *)
+  let _, mf2 = msg_record msg_s msg2 in
+  ( match StringMap.find_opt "addresses" mf2 with
+  | Some (List al) ->
+    Alcotest.(check int) "list msg: 2 unique addrs" 2 (List.length al)
+  | _ -> Alcotest.fail "list msg: addresses"
+  );
+
+  (* ---- build_msg: edge case coverage ---- *)
+  let mk_order fields =
+    Record
+      ( order_s,
+        List.fold_left
+          (fun m (k, v) -> StringMap.add k v m)
+          (sm
+          |> StringMap.add "id" (Uint 50)
+          |> StringMap.add "modified_at" (Timestamp 1750800000)
+          )
+          fields )
+  in
+  let line_rec i p =
+    ( line_s,
+      sm |> StringMap.add "i" (Uint i) |> StringMap.add "product" (String p) )
+  in
+  let addr_rec id st =
+    ( addr_s,
+      sm
+      |> StringMap.add "id" (Uint id)
+      |> StringMap.add "street" (String st)
+      |> StringMap.add "city" (String "City") )
+  in
+
+  (* Top-level scalar passthrough *)
+  let _, rv = build_msg ctx (make_query []) (String "hi") in
+  ( match rv with
+  | String "hi" -> ()
+  | _ -> Alcotest.fail "bm: scalar passthrough"
+  );
+
+  (* Top-level Series *)
+  let _, rv =
+    build_msg ctx
+      (make_query [ "select~", "i" ])
+      (Series [ line_rec 1 "A"; line_rec 2 "B" ])
+  in
+  ( match rv with
+  | Series [ (_, f1); _ ] ->
+    if StringMap.mem "product" f1
+    then Alcotest.fail "bm: series product filtered";
+    if not (StringMap.mem "i" f1) then Alcotest.fail "bm: series i missing"
+  | _ -> Alcotest.fail "bm: expected Series"
+  );
+
+  (* List with non-Record items *)
+  let _, rv = build_msg ctx (make_query []) (List [ String "a"; Int 1 ]) in
+  ( match rv with
+  | List [ String "a"; Int 1 ] -> ()
+  | _ -> Alcotest.fail "bm: list non-record"
+  );
+
+  (* expand: ref → fetched and sub-selected *)
+  let _, rv =
+    build_msg ctx
+      (make_query [ "select~", "id,addresses(id,street)" ])
+      (mk_order
+         [
+           ( "addresses",
+             List [ Record (addr_s, StringMap.singleton "id" (Uint 1)) ] );
+         ]
+      )
+  in
+  ( match rv with
+  | Record (_, flds) -> (
+    match StringMap.find_opt "addresses" flds with
+    | Some (List [ Record (_, af) ]) ->
+      if not (StringMap.mem "street" af)
+      then Alcotest.fail "bm: expand ref street";
+      if StringMap.mem "city" af
+      then Alcotest.fail "bm: expand ref city filtered"
+    | _ -> Alcotest.fail "bm: expand ref shape"
+  )
+  | _ -> Alcotest.fail "bm: expand ref"
+  );
+
+  (* expand: ref, fetcher Error → warning *)
+  let w = ref [] in
+  let _ =
+    build_msg ctx ~warn:w
+      (make_query [ "select~", "id,addresses(id)" ])
+      (mk_order
+         [
+           ( "addresses",
+             List [ Record (addr_s, StringMap.singleton "id" (Uint 999)) ] );
+         ]
+      )
+  in
+  if !w = [] then Alcotest.fail "bm: expand ref error warn";
+
+  (* expand: ref, no fetcher → unchanged *)
+  let _, rv =
+    build_msg ctx
+      (make_query [ "select~", "id,lines(i)" ])
+      (mk_order
+         [
+           "lines", List [ Record (line_s, StringMap.singleton "i" (Uint 1)) ];
+         ]
+      )
+  in
+  ( match rv with
+  | Record (_, flds) -> (
+    match StringMap.find_opt "lines" flds with
+    | Some (List [ Record (_, lf) ]) ->
+      if not (StringMap.mem "i" lf) then Alcotest.fail "bm: expand nofetch i"
+    | _ -> Alcotest.fail "bm: expand nofetch shape"
+  )
+  | _ -> Alcotest.fail "bm: expand nofetch"
+  );
+
+  (* expand: Series value *)
+  let _, rv =
+    build_msg ctx
+      (make_query [ "select~", "id,lines(i)" ])
+      (mk_order [ "lines", Series [ line_rec 1 "A"; line_rec 2 "B" ] ])
+  in
+  ( match rv with
+  | Record (_, flds) -> (
+    match StringMap.find_opt "lines" flds with
+    | Some (Series [ (_, f1); _ ]) ->
+      if StringMap.mem "product" f1
+      then Alcotest.fail "bm: expand series product"
+    | _ -> Alcotest.fail "bm: expand series shape"
+  )
+  | _ -> Alcotest.fail "bm: expand series"
+  );
+
+  (* expand: scalar value → passthrough *)
+  let _, rv =
+    build_msg ctx
+      (make_query [ "select~", "id,name(x)" ])
+      (mk_order [ "name", String "Test" ])
+  in
+  ( match rv with
+  | Record (_, flds) -> (
+    match StringMap.find_opt "name" flds with
+    | Some (String "Test") -> ()
+    | _ -> Alcotest.fail "bm: expand scalar"
+  )
+  | _ -> Alcotest.fail "bm: expand scalar rec"
+  );
+
+  (* attach: ref, no fetcher → unchanged *)
+  let _, rv =
+    build_msg ctx
+      (make_query [ "select~", "id,$lines(i)" ])
+      (mk_order
+         [
+           "lines", List [ Record (line_s, StringMap.singleton "i" (Uint 1)) ];
+         ]
+      )
+  in
+  ( match rv with
+  | Record (_, flds) -> (
+    match StringMap.find_opt "lines" flds with
+    | Some (List [ Record (_, lf) ]) ->
+      if not (StringMap.mem "i" lf) then Alcotest.fail "bm: attach nofetch i"
+    | _ -> Alcotest.fail "bm: attach nofetch shape"
+  )
+  | _ -> Alcotest.fail "bm: attach nofetch"
+  );
+
+  (* attach: ref, fetcher Error → warning *)
+  let w = ref [] in
+  let _ =
+    build_msg ctx ~warn:w
+      (make_query [ "select~", "id,$addresses(id)" ])
+      (mk_order
+         [
+           ( "addresses",
+             List [ Record (addr_s, StringMap.singleton "id" (Uint 999)) ] );
+         ]
+      )
+  in
+  if !w = [] then Alcotest.fail "bm: attach ref error warn";
+
+  (* attach: non-ref Record → added to msg, output becomes ref *)
+  let m = make_msg () in
+  let m, rv =
+    build_msg ctx
+      (make_query [ "select~", "id,$addresses(id,street)" ])
+      ~msg:m
+      (mk_order [ "addresses", List [ Record (addr_rec 1 "Inline St") ] ])
+  in
+  ( match rv with
+  | Record (_, flds) -> (
+    match StringMap.find_opt "addresses" flds with
+    | Some (List [ Record r ]) ->
+      if not (is_ref r) then Alcotest.fail "bm: attach nonref → ref"
+    | _ -> Alcotest.fail "bm: attach nonref shape"
+  )
+  | _ -> Alcotest.fail "bm: attach nonref"
+  );
+  let _, mf = msg_record msg_s m in
+  ( match StringMap.find_opt "addresses" mf with
+  | Some (List [ Record (_, af) ]) ->
+    if not (StringMap.mem "street" af)
+    then Alcotest.fail "bm: attach nonref msg street";
+    if StringMap.mem "city" af then Alcotest.fail "bm: attach nonref msg city"
+  | _ -> Alcotest.fail "bm: attach nonref msg"
+  );
+
+  (* attach: Series value *)
+  let m = make_msg () in
+  let _, rv =
+    build_msg ctx
+      (make_query [ "select~", "id,$addresses(id)" ])
+      ~msg:m
+      (mk_order [ "addresses", Series [ addr_rec 10 "S1"; addr_rec 11 "S2" ] ])
+  in
+  ( match rv with
+  | Record (_, flds) -> (
+    match StringMap.find_opt "addresses" flds with
+    | Some (Series [ r1; r2 ]) ->
+      if not (is_ref r1) then Alcotest.fail "bm: attach series ref1";
+      if not (is_ref r2) then Alcotest.fail "bm: attach series ref2"
+    | _ -> Alcotest.fail "bm: attach series shape"
+  )
+  | _ -> Alcotest.fail "bm: attach series"
+  );
+
+  (* attach: scalar value → passthrough *)
+  let _, rv =
+    build_msg ctx
+      (make_query [ "select~", "id,$name" ])
+      (mk_order [ "name", String "Pass" ])
+  in
+  ( match rv with
+  | Record (_, flds) -> (
+    match StringMap.find_opt "name" flds with
+    | Some (String "Pass") -> ()
+    | _ -> Alcotest.fail "bm: attach scalar"
+  )
+  | _ -> Alcotest.fail "bm: attach scalar rec"
+  )
+;;
+
 let () =
   Alcotest.run "vof"
     [
@@ -3036,5 +3699,7 @@ let () =
           Alcotest.test_case "children and collections" `Quick
             test_diff_children_and_collections;
         ] );
+      ( "Services",
+        [ Alcotest.test_case "query, msg, build_msg" `Quick test_services ] );
     ]
 ;;
