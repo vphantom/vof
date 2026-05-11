@@ -1181,9 +1181,9 @@ and diff_field k va vb acc =
       | [] -> acc
       | dl -> StringMap.add k (List (List.map (fun r -> Record r) dl)) acc
     )
-    | _ -> if compare va vb = 0 then acc else StringMap.add k vb acc
+    | _ -> if equal va vb then acc else StringMap.add k vb acc
   )
-  | _ -> if compare va vb = 0 then acc else StringMap.add k vb acc
+  | _ -> if equal va vb then acc else StringMap.add k vb acc
 
 and diff_record_list old_list new_list =
   let schema =
