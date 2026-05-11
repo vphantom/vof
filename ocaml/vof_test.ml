@@ -1,11 +1,7 @@
 (** TODO:
 
-    - [Vof_json]
-    - [Vof_cbor]
-    - [Vof_bin]
-    - [Vof.Read] + [equal], [diff], [pp] (thus also [pp_ref]), [make_ref]
-    - Services: [make_query] parsing, selection, filters, [build_msg],
-      [msg_add], [msg_record]
+    - [make_query]
+    - [build_msg], [msg_add], [msg_record]
 
     /TODO *)
 
@@ -71,6 +67,48 @@ let test_detect_format () =
           | Some Vof.Binary -> "Binary"
           | None -> "None"
           )
+    )
+    cases
+;;
+
+(* === Warnings === *)
+
+let test_pp_warn () =
+  let open Vof in
+  let cases =
+    [
+      `Vof_bad_field ("order", "name"), [ "order"; "name" ];
+      `Vof_fetch_failed ("order", "not found"), [ "order"; "not found" ];
+      `Vof_invalid_param ("max~", "abc"), [ "max~"; "abc" ];
+      `Vof_unknown_param "foo~", [ "foo~" ];
+    ]
+  in
+  let has_sub s sub =
+    let slen = String.length s
+    and sublen = String.length sub in
+    if sublen > slen
+    then false
+    else (
+      let rec check i =
+        if i > slen - sublen
+        then false
+        else if String.sub s i sublen = sub
+        then true
+        else check (i + 1)
+      in
+      check 0
+    )
+  in
+  List.iter
+    (fun (w, expected_subs) ->
+      let s = pp_warn w in
+      if String.length s = 0 then Alcotest.fail "pp_warn returned empty string";
+      List.iter
+        (fun sub ->
+          if not (has_sub s sub)
+          then Alcotest.failf "pp_warn: expected %S in %S" sub s
+        )
+        expected_subs
     )
     cases
 ;;
@@ -273,6 +311,105 @@ let test_context_load_nonexistent_update () =
   let _s = Vof.Context.schema ctx "foo" in
   let _ = Vof.Context.lookup_id ctx "com.test.foo" "bar" in
   ()
+;;
+
+let test_context_schema_redefine_no_update () =
+  let path = tmp_symtable () in
+  let fields =
+    [
+      "id", [ Vof.Key ];
+      "updated_at", [ Req ];
+      "items", [ List_of "com.test.gadget.item" ];
+      "label", [ Other ("indexed", None) ];
+      "meta", [ Other ("format", Some "json") ];
+      "value", [];
+    ]
+  in
+  (* Build schema in update mode, register symbols, save *)
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  Vof.Context.load ctx path;
+  let _ = Vof.Context.schema ctx ~fields "gadget" in
+  List.iter
+    (fun (s, _) -> ignore (Vof.Context.lookup_id ctx "com.test.gadget" s))
+    fields;
+  Vof.Context.save ctx;
+  (* Reload in non-update mode *)
+  let ctx2 = Vof.Context.make ~update:false "com.test" in
+  Vof.Context.load ctx2 path;
+  (* Identical re-declaration succeeds *)
+  let s = Vof.Context.schema ctx2 ~fields "gadget" in
+  Alcotest.(check string) "path" "com.test.gadget" s.path;
+  Alcotest.(check (list string)) "keys" [ "id" ] s.keys;
+  Alcotest.(check (list string)) "reqs" [ "updated_at" ] s.reqs;
+  (* Incompatible: promote plain field "value" to Key *)
+  let raised =
+    match Vof.Context.schema ctx2 ~fields:[ "value", [ Key ] ] "gadget" with
+    | _ -> false
+    | exception Invalid_argument _ -> true
+  in
+  if not raised
+  then
+    Alcotest.fail
+      "expected Invalid_argument for incompatible qualifier in non-update mode"
+;;
+
+let test_context_schema_redefine_update () =
+  let path = tmp_symtable () in
+  let fields =
+    [
+      "id", [ Vof.Key ];
+      "updated_at", [ Req ];
+      "items", [ List_of "com.test.gizmo.item" ];
+      "label", [ Other ("indexed", None) ];
+      "meta", [ Other ("format", Some "json") ];
+      "value", [];
+    ]
+  in
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  Vof.Context.load ctx path;
+  let _ = Vof.Context.schema ctx ~fields "gizmo" in
+  List.iter
+    (fun (s, _) -> ignore (Vof.Context.lookup_id ctx "com.test.gizmo" s))
+    fields;
+  Vof.Context.save ctx;
+  let read_file p =
+    let ic = open_in p in
+    let s = In_channel.input_all ic in
+    close_in ic; s
+  in
+  let saved1 = read_file path in
+  (* Identical re-declaration: no modification *)
+  let s1 = Vof.Context.schema ctx ~fields "gizmo" in
+  Alcotest.(check string) "path unchanged" "com.test.gizmo" s1.path;
+  Alcotest.(check (list string)) "keys unchanged" [ "id" ] s1.keys;
+  Alcotest.(check (list string)) "reqs unchanged" [ "updated_at" ] s1.reqs;
+  Vof.Context.save ctx;
+  let saved2 = read_file path in
+  Alcotest.(check string)
+    "file unchanged after identical re-declaration" saved1 saved2;
+  (* Update: promote "value" to Req and add new field "extra" *)
+  let s2 =
+    Vof.Context.schema ctx
+      ~fields:
+        [
+          "id", [ Key ];
+          "updated_at", [ Req ];
+          "items", [ List_of "com.test.gizmo.item" ];
+          "label", [ Other ("indexed", None) ];
+          "meta", [ Other ("format", Some "json") ];
+          "value", [ Req ];
+          "extra", [];
+        ]
+      "gizmo"
+  in
+  if not (List.mem "updated_at" s2.reqs)
+  then Alcotest.fail "reqs should still contain updated_at";
+  if not (List.mem "value" s2.reqs)
+  then Alcotest.fail "reqs should now contain value";
+  Vof.Context.save ctx;
+  let saved3 = read_file path in
+  if saved3 = saved2
+  then Alcotest.fail "expected file to change after schema update"
 ;;
 
 let pow10 n =
@@ -2256,10 +2393,515 @@ let test_pp_smoke () =
   then Alcotest.fail "pp_ref on addr ref returned empty string"
 ;;
 
+(* === Read helpers: each_field, field, children === *)
+
+type test_addr = { a_id: int; a_street: string; a_city: string; a_zip: string }
+
+let empty_addr = { a_id = 0; a_street = ""; a_city = ""; a_zip = "" }
+
+type test_line = {
+  l_i: int;
+  l_product: string;
+  l_qty: (int * int) * string option;
+  l_unit_price: int * int;
+}
+
+let empty_line =
+  { l_i = 0; l_product = ""; l_qty = (0, 0), None; l_unit_price = 0, 0 }
+;;
+
+let test_each_field_happy () =
+  let open Vof in
+  let all = make_test_ctx () in
+  let ctx, _, _, _, address_schema, _, _, _ = all in
+  let v = make_test_t all in
+  let msg_fields =
+    match v with
+    | Record (_, f) -> f
+    | _ -> Alcotest.fail "expected Record"
+  in
+  let addrs_v =
+    match StringMap.find_opt "addresses" msg_fields with
+    | Some v -> v
+    | None -> Alcotest.fail "missing addresses"
+  in
+  let decode_addr v =
+    let sm =
+      match Read.record ctx address_schema Option.some v with
+      | Some sm -> sm
+      | None -> Alcotest.fail "record decode failed"
+    in
+    match
+      Read.each_field (address_schema, sm) empty_addr (fun k v acc ->
+        match k with
+        | "id" -> { acc with a_id = Read.field Read.uint v }
+        | "street" -> { acc with a_street = Read.field Read.string v }
+        | "city" -> { acc with a_city = Read.field Read.string v }
+        | "zip" -> { acc with a_zip = Read.field Read.string v }
+        | _ -> acc
+    )
+    with
+    | Some a -> a
+    | None -> Alcotest.fail "each_field returned None"
+  in
+  let addrs =
+    match Read.list (fun x -> Some x) addrs_v with
+    | Some l -> List.map decode_addr l
+    | None -> Alcotest.fail "addrs not a list"
+  in
+  let a1, a2 =
+    match addrs with
+    | [ a; b ] -> a, b
+    | _ -> Alcotest.failf "expected 2 addresses, got %d" (List.length addrs)
+  in
+  Alcotest.(check int) "a1.id" 1 a1.a_id;
+  Alcotest.(check string) "a1.street" "123 Main St" a1.a_street;
+  Alcotest.(check string) "a1.city" "Montreal" a1.a_city;
+  Alcotest.(check string) "a1.zip" "H2X1A1" a1.a_zip;
+  Alcotest.(check int) "a2.id" 2 a2.a_id;
+  Alcotest.(check string) "a2.street" "456 Oak Ave" a2.a_street;
+  Alcotest.(check string) "a2.city" "Toronto" a2.a_city;
+  Alcotest.(check string) "a2.zip" "M5V2T6" a2.a_zip;
+  (* Test ~null default: address with Null city gets fallback *)
+  let null_city_sm =
+    StringMap.empty
+    |> StringMap.add "id" (Uint 99)
+    |> StringMap.add "street" (String "Test St")
+    |> StringMap.add "city" Null
+    |> StringMap.add "zip" (String "X0X0X0")
+  in
+  match
+    Read.each_field (address_schema, null_city_sm) empty_addr (fun k v acc ->
+      match k with
+      | "id" -> { acc with a_id = Read.field Read.uint v }
+      | "street" -> { acc with a_street = Read.field Read.string v }
+      | "city" -> { acc with a_city = Read.field Read.string ~null:"default" v }
+      | "zip" -> { acc with a_zip = Read.field Read.string v }
+      | _ -> acc
+  )
+  with
+  | Some a ->
+    Alcotest.(check string) "null city gets default" "default" a.a_city
+  | None -> Alcotest.fail "each_field with ~null returned None"
+;;
+
+let test_each_field_errors () =
+  let open Vof in
+  let all = make_test_ctx () in
+  let _, _, _, _, address_schema, _, _, _ = all in
+  (* Type mismatch: Bool where string expected *)
+  let bad_sm =
+    StringMap.empty
+    |> StringMap.add "id" (Uint 1)
+    |> StringMap.add "street" (Bool true)
+    |> StringMap.add "city" (String "Montreal")
+    |> StringMap.add "zip" (String "H2X1A1")
+  in
+  let warn = ref [] in
+  let result =
+    Read.each_field ~warn (address_schema, bad_sm) empty_addr (fun k v acc ->
+      match k with
+      | "id" -> { acc with a_id = Read.field Read.uint v }
+      | "street" -> { acc with a_street = Read.field Read.string v }
+      | "city" -> { acc with a_city = Read.field Read.string v }
+      | "zip" -> { acc with a_zip = Read.field Read.string v }
+      | _ -> acc
+  )
+  in
+  if Option.is_some result then Alcotest.fail "expected None on type mismatch";
+  if List.length !warn = 0
+  then Alcotest.fail "expected warning on type mismatch";
+  (* Null without ~null default → failure *)
+  let null_sm =
+    StringMap.empty
+    |> StringMap.add "id" (Uint 1)
+    |> StringMap.add "street" Null
+    |> StringMap.add "city" (String "Montreal")
+    |> StringMap.add "zip" (String "H2X1A1")
+  in
+  let warn2 = ref [] in
+  let result2 =
+    Read.each_field ~warn:warn2 (address_schema, null_sm) empty_addr
+      (fun k v acc ->
+      match k with
+      | "id" -> { acc with a_id = Read.field Read.uint v }
+      | "street" -> { acc with a_street = Read.field Read.string v }
+      | "city" -> { acc with a_city = Read.field Read.string v }
+      | "zip" -> { acc with a_zip = Read.field Read.string v }
+      | _ -> acc
+  )
+  in
+  if Option.is_some result2
+  then Alcotest.fail "expected None on Null without ~null";
+  if List.length !warn2 = 0
+  then Alcotest.fail "expected warning on Null without default"
+;;
+
+let test_children_patch () =
+  let open Vof in
+  let all = make_test_ctx () in
+  let ctx, _, _, line_schema, _, _, _, _ = all in
+  (* Current lines matching make_test_t *)
+  let existing =
+    [
+      {
+        l_i = 1;
+        l_product = "Widget";
+        l_qty = (10, 0), None;
+        l_unit_price = 599, 2;
+      };
+      {
+        l_i = 2;
+        l_product = "Gadget";
+        l_qty = (3, 0), None;
+        l_unit_price = 1299, 2;
+      };
+    ]
+  in
+  let line_of_vof base v =
+    match Read.record ctx line_schema Option.some v with
+    | None -> None
+    | Some sm ->
+      let init = Option.value ~default:empty_line base in
+      Read.each_field (line_schema, sm) init (fun k v acc ->
+        match k with
+        | "i" -> { acc with l_i = Read.field Read.uint v }
+        | "product" ->
+          { acc with l_product = Read.field Read.string ~null:acc.l_product v }
+        | "qty" ->
+          { acc with l_qty = Read.field Read.quantity ~null:acc.l_qty v }
+        | "unit_price" ->
+          {
+            acc with
+            l_unit_price = Read.field Read.decimal ~null:acc.l_unit_price v;
+          }
+        | _ -> acc
+    )
+  in
+  let line_key_of l = l.l_i in
+  let line_key_read sm =
+    match StringMap.find_opt "i" sm with
+    | None -> None
+    | Some v -> Read.uint v
+  in
+  (* Patch: delete line 1, edit line 2 qty, add new line *)
+  let patch =
+    List
+      [
+        (* Delete: reference with only key field *)
+        Record (line_schema, StringMap.singleton "i" (Uint 1));
+        (* Edit: key + changed qty *)
+        Record
+          ( line_schema,
+            StringMap.empty
+            |> StringMap.add "i" (Uint 2)
+            |> StringMap.add "qty" (Quantity ((5, 0), None))
+          );
+        (* Add: no key field *)
+        Record
+          ( line_schema,
+            StringMap.empty
+            |> StringMap.add "product" (String "Doohickey")
+            |> StringMap.add "qty" (Quantity ((7, 0), None))
+            |> StringMap.add "unit_price" (Decimal (399, 2))
+          );
+      ]
+  in
+  let result =
+    Read.children ctx line_schema ~of_vof:line_of_vof ~key_of:line_key_of
+      ~key_read:line_key_read existing patch
+  in
+  match result with
+  | None -> Alcotest.fail "children returned None"
+  | Some [ edited; added ] ->
+    (* Line 1 deleted: not in result *)
+    (* Line 2 edited: qty updated, product and unit_price preserved *)
+    Alcotest.(check int) "edited.i" 2 edited.l_i;
+    Alcotest.(check string) "edited.product preserved" "Gadget" edited.l_product;
+    if edited.l_qty <> ((5, 0), None)
+    then Alcotest.fail "edited.qty should be (5,0),None";
+    if edited.l_unit_price <> (1299, 2)
+    then Alcotest.fail "edited.unit_price should be preserved";
+    (* New line added *)
+    Alcotest.(check int) "added.i" 0 added.l_i;
+    Alcotest.(check string) "added.product" "Doohickey" added.l_product;
+    if added.l_qty <> ((7, 0), None)
+    then Alcotest.fail "added.qty should be (7,0),None";
+    if added.l_unit_price <> (399, 2)
+    then Alcotest.fail "added.unit_price mismatch"
+  | Some l -> Alcotest.failf "expected 2 result lines, got %d" (List.length l)
+;;
+
+(* === Diff === *)
+
+let diff_fields a b =
+  match Vof.diff (Vof.Record a) (Vof.Record b) with
+  | None -> Alcotest.fail "diff returned None for two records"
+  | Some (Vof.Record (_, fields)) -> fields
+  | Some _ -> Alcotest.fail "diff returned non-Record"
+;;
+
+let test_diff_non_records () =
+  let open Vof in
+  if Option.is_some (diff (Int 1) (Int 2)) then Alcotest.fail "Int vs Int";
+  if Option.is_some (diff (List []) (List [])) then Alcotest.fail "List vs List";
+  if Option.is_some (diff (String "a") (String "b"))
+  then Alcotest.fail "String vs String";
+  if Option.is_some (diff Null Null) then Alcotest.fail "Null vs Null";
+  (* Mixed: one record, one non-record *)
+  let _, _, _, _, addr_s, _, _, _ = make_test_ctx () in
+  let r = Record (addr_s, StringMap.singleton "id" (Uint 1)) in
+  if Option.is_some (diff r (Int 1)) then Alcotest.fail "Record vs Int";
+  if Option.is_some (diff (Int 1) r) then Alcotest.fail "Int vs Record"
+;;
+
+let test_diff_scalars () =
+  let open Vof in
+  let _, _, _, _, addr_s, _, _, _ = make_test_ctx () in
+  let mk id fields =
+    ( addr_s,
+      List.fold_left
+        (fun m (k, v) -> StringMap.add k v m)
+        (StringMap.singleton "id" (Uint id))
+        fields )
+  in
+  (* Identical → only key *)
+  let r =
+    mk 1
+      [
+        "street", String "123 Main St";
+        "city", String "Montreal";
+        "zip", String "H2X1A1";
+      ]
+  in
+  let p = diff_fields r r in
+  if not (StringMap.mem "id" p) then Alcotest.fail "identical: missing key";
+  if StringMap.mem "street" p then Alcotest.fail "identical: has street";
+  if StringMap.mem "city" p then Alcotest.fail "identical: has city";
+  if StringMap.mem "zip" p then Alcotest.fail "identical: has zip";
+  (* Changed + removed + unchanged *)
+  let a =
+    mk 1
+      [
+        "street", String "123 Main St";
+        "city", String "Montreal";
+        "zip", String "H2X1A1";
+      ]
+  in
+  let b = mk 1 [ "street", String "456 Oak Ave"; "zip", String "H2X1A1" ] in
+  let p = diff_fields a b in
+  if not (StringMap.mem "id" p) then Alcotest.fail "change: missing key";
+  ( match StringMap.find_opt "street" p with
+  | Some (String "456 Oak Ave") -> ()
+  | _ -> Alcotest.fail "change: street should be '456 Oak Ave'"
+  );
+  ( match StringMap.find_opt "city" p with
+  | Some Null -> ()
+  | _ -> Alcotest.fail "change: city should be Null (removed)"
+  );
+  if StringMap.mem "zip" p then Alcotest.fail "change: unchanged zip present";
+  (* Added field *)
+  let a2 = mk 2 [ "street", String "X" ] in
+  let b2 = mk 2 [ "street", String "X"; "city", String "Toronto" ] in
+  let p = diff_fields a2 b2 in
+  if StringMap.mem "street" p then Alcotest.fail "add: unchanged street";
+  ( match StringMap.find_opt "city" p with
+  | Some (String "Toronto") -> ()
+  | _ -> Alcotest.fail "add: city should be Toronto"
+  );
+  (* Null → value *)
+  let a3 = mk 3 [ "street", Null ] in
+  let b3 = mk 3 [ "street", String "New St" ] in
+  let p = diff_fields a3 b3 in
+  ( match StringMap.find_opt "street" p with
+  | Some (String "New St") -> ()
+  | _ -> Alcotest.fail "null_to_val: street should be 'New St'"
+  );
+  (* Value → Null *)
+  let p = diff_fields b3 a3 in
+  match StringMap.find_opt "street" p with
+  | Some Null -> ()
+  | _ -> Alcotest.fail "val_to_null: street should be Null"
+;;
+
+let test_diff_children_and_collections () =
+  let open Vof in
+  let _, _, order_s, line_s, addr_s, _, _, _ = make_test_ctx () in
+  let sm = StringMap.empty in
+  let mk_line i prod qty price =
+    Record
+      ( line_s,
+        sm
+        |> StringMap.add "i" (Uint i)
+        |> StringMap.add "product" (String prod)
+        |> StringMap.add "qty" (Quantity (qty, None))
+        |> StringMap.add "unit_price" (Decimal price)
+      )
+  in
+  let mk_order fields =
+    ( order_s,
+      List.fold_left
+        (fun m (k, v) -> StringMap.add k v m)
+        (sm
+        |> StringMap.add "id" (Uint 42)
+        |> StringMap.add "modified_at" (Timestamp 1750800000)
+        )
+        fields )
+  in
+  let tags v =
+    Strmap
+      (sm
+      |> StringMap.add "priority" (String v)
+      |> StringMap.add "source" (String "web")
+      )
+  in
+  let scores v = Uintmap (IntMap.empty |> IntMap.add 1 (Int v)) in
+  (* a: lines 1,2 ; b: lines 2(edited),3(new) ; line 1 deleted *)
+  let a =
+    mk_order
+      [
+        "name", String "Test Order";
+        ( "lines",
+          List
+            [
+              mk_line 1 "Widget" (10, 0) (599, 2);
+              mk_line 2 "Gadget" (3, 0) (1299, 2);
+            ] );
+        "tags", tags "high";
+        "scores", scores 100;
+        "flags", List [ Bool true; Bool false ];
+      ]
+  in
+  let b =
+    mk_order
+      [
+        "name", String "Test Order";
+        ( "lines",
+          List
+            [
+              mk_line 2 "Gadget" (5, 0) (1299, 2);
+              mk_line 3 "Thing" (7, 0) (399, 2);
+            ] );
+        "tags", tags "low";
+        "scores", scores 200;
+        "flags", List [ Bool true; Bool true ];
+      ]
+  in
+  let p = diff_fields a b in
+  if not (StringMap.mem "id" p) then Alcotest.fail "missing key";
+  if StringMap.mem "name" p then Alcotest.fail "unchanged name present";
+  (* Lines: child PATCH semantics *)
+  ( match StringMap.find_opt "lines" p with
+  | Some (List pl) -> (
+    let find_i t =
+      List.find_opt
+        (function
+          | Record (_, m) -> StringMap.find_opt "i" m = Some (Uint t)
+          | _ -> false
+          )
+        pl
+    in
+    (* Line 1 deleted → reference only *)
+    ( match find_i 1 with
+    | Some (Record r) ->
+      if not (is_ref r) then Alcotest.fail "line1: should be ref (delete)"
+    | _ -> Alcotest.fail "line1: delete missing"
+    );
+    (* Line 2 edited → key + changed qty only *)
+    ( match find_i 2 with
+    | Some (Record (_, m)) ->
+      ( match StringMap.find_opt "qty" m with
+      | Some (Quantity ((5, 0), None)) -> ()
+      | _ -> Alcotest.fail "line2: qty should be (5,0)"
+      );
+      if StringMap.mem "product" m then Alcotest.fail "line2: unchanged product";
+      if StringMap.mem "unit_price" m
+      then Alcotest.fail "line2: unchanged unit_price"
+    | _ -> Alcotest.fail "line2: edit missing"
+    );
+    (* Line 3 added → full record *)
+    match find_i 3 with
+    | Some (Record (_, m)) ->
+      if StringMap.find_opt "product" m <> Some (String "Thing")
+      then Alcotest.fail "line3: should have product"
+    | _ -> Alcotest.fail "line3: add missing"
+  )
+  | _ -> Alcotest.fail "lines should be a List"
+  );
+  (* Strmap: changed → present *)
+  ( match StringMap.find_opt "tags" p with
+  | Some t -> if not (equal t (tags "low")) then Alcotest.fail "tags mismatch"
+  | None -> Alcotest.fail "tags should be present"
+  );
+  (* Uintmap: changed → present *)
+  ( match StringMap.find_opt "scores" p with
+  | Some s -> if not (equal s (scores 200)) then Alcotest.fail "scores mismatch"
+  | None -> Alcotest.fail "scores should be present"
+  );
+  (* Scalar list: changed → full replacement *)
+  ( match StringMap.find_opt "flags" p with
+  | Some (List [ Bool true; Bool true ]) -> ()
+  | _ -> Alcotest.fail "flags mismatch"
+  );
+  (* Identical children → lines omitted *)
+  let same = mk_order [ "lines", List [ mk_line 1 "X" (1, 0) (1, 0) ] ] in
+  let p = diff_fields same same in
+  if StringMap.mem "lines" p
+  then Alcotest.fail "identical: lines should be omitted";
+  (* Nested single record: recursive diff *)
+  let nest1 =
+    Record
+      ( addr_s,
+        sm
+        |> StringMap.add "id" (Uint 1)
+        |> StringMap.add "street" (String "123 Main St")
+        |> StringMap.add "city" (String "Montreal")
+      )
+  in
+  let nest2 =
+    Record
+      ( addr_s,
+        sm
+        |> StringMap.add "id" (Uint 1)
+        |> StringMap.add "street" (String "456 Oak Ave")
+        |> StringMap.add "city" (String "Montreal")
+      )
+  in
+  let ra = mk_order [ "tags", nest1 ] in
+  let rb = mk_order [ "tags", nest2 ] in
+  let p = diff_fields ra rb in
+  ( match StringMap.find_opt "tags" p with
+  | Some (Record (_, m)) ->
+    if not (StringMap.mem "id" m) then Alcotest.fail "nested: missing key";
+    ( match StringMap.find_opt "street" m with
+    | Some (String "456 Oak Ave") -> ()
+    | _ -> Alcotest.fail "nested: street should be changed"
+    );
+    if StringMap.mem "city" m
+    then Alcotest.fail "nested: unchanged city present"
+  | _ -> Alcotest.fail "nested record: tags should be a Record patch"
+  );
+  (* Nested single record: identical → omitted *)
+  let rc = mk_order [ "tags", nest1 ] in
+  let p = diff_fields rc rc in
+  if StringMap.mem "tags" p
+  then Alcotest.fail "identical nested: tags should be omitted";
+  (* Identical non-empty non-record list → omitted *)
+  let fl = List [ Bool true; Bool false ] in
+  let fa = mk_order [ "flags", fl ] in
+  let p = diff_fields fa fa in
+  if StringMap.mem "flags" p
+  then Alcotest.fail "identical non-record list: flags should be omitted"
+;;
+
 let () =
   Alcotest.run "vof"
     [
-      "Core", [ Alcotest.test_case "detect_format" `Quick test_detect_format ];
+      ( "Core",
+        [
+          Alcotest.test_case "detect_format" `Quick test_detect_format;
+          Alcotest.test_case "pp_warn" `Quick test_pp_warn;
+        ] );
       ( "Context",
         [
           Alcotest.test_case "make" `Quick test_context_make;
@@ -2276,6 +2918,10 @@ let () =
             test_context_save_load_qualifiers;
           Alcotest.test_case "load nonexistent in update mode" `Quick
             test_context_load_nonexistent_update;
+          Alcotest.test_case "schema redefine no-update" `Quick
+            test_context_schema_redefine_no_update;
+          Alcotest.test_case "schema redefine update" `Quick
+            test_context_schema_redefine_update;
         ] );
       ( "Float16",
         [
@@ -2372,6 +3018,23 @@ let () =
           Alcotest.test_case "equal, is_ref, make_ref" `Quick
             test_equal_is_ref_make_ref;
           Alcotest.test_case "pp smoke" `Quick test_pp_smoke;
+        ] );
+      ( "Read helpers",
+        [
+          Alcotest.test_case "each_field + field happy path" `Quick
+            test_each_field_happy;
+          Alcotest.test_case "each_field + field errors" `Quick
+            test_each_field_errors;
+          Alcotest.test_case "children patch semantics" `Quick
+            test_children_patch;
+        ] );
+      ( "Diff",
+        [
+          Alcotest.test_case "non-records return None" `Quick
+            test_diff_non_records;
+          Alcotest.test_case "scalar fields" `Quick test_diff_scalars;
+          Alcotest.test_case "children and collections" `Quick
+            test_diff_children_and_collections;
         ] );
     ]
 ;;
