@@ -570,7 +570,7 @@ module Read = struct
   ;;
 
   let decimal = function
-    | Decimal d | Percent d -> Some d
+    | Decimal d | Percent d -> Some (Decimal.optimize d)
     | Raw_bint n -> Decimal.of_n n
     | Raw_int n -> Some (Decimal.unpack n)
     | Raw_tag (-1, Raw_int n) -> Some (Decimal.unpack (-n))
@@ -587,7 +587,7 @@ module Read = struct
   ;;
 
   let percent = function
-    | Percent d | Decimal d -> Some d
+    | Percent d | Decimal d -> Some (Decimal.optimize d)
     | Raw_bint n -> Decimal.of_n n
     | Raw_int d -> Some (Decimal.unpack d)
     | Raw_tint i -> Some (Decimal.optimize (i, 2))
@@ -698,7 +698,7 @@ module Read = struct
   ;;
 
   let tax = function
-    | Tax (a, b, c) -> Some (a, b, c)
+    | Tax (a, b, c) -> Some (Decimal.optimize a, b, c)
     | Raw_blist [ d; t ]
     | Raw_list [ d; t ]
     | Raw_tlist [ d; t ]
@@ -758,6 +758,13 @@ module Read = struct
   ;;
 
   let strmap f = function
+    | Strmap sm ->
+      let each k v acc =
+        match f v with
+        | Some v' -> StringMap.add k v' acc
+        | _ -> acc
+      in
+      Some (StringMap.fold each sm StringMap.empty)
     | Raw_blist l | Raw_tlist l | Raw_list l | List l ->
       let rec each sm = function
         | [] -> Some sm
@@ -772,14 +779,35 @@ module Read = struct
     | _ -> None
   ;;
 
-  let text v = strmap string v
-
-  let uintmap f = function
+  let text = function
+    | Text sm -> Some sm
     | Raw_blist l | Raw_tlist l | Raw_list l | List l ->
       let rec each sm = function
         | [] -> Some sm
         | k :: v :: rest -> (
-          match int k, f v with
+          match string k, string v with
+          | Some ks, Some vs -> each (StringMap.add ks vs sm) rest
+          | _ -> None
+        )
+        | _ -> None
+      in
+      each StringMap.empty l
+    | _ -> None
+  ;;
+
+  let uintmap f = function
+    | Uintmap sm ->
+      let each k v acc =
+        match f v with
+        | Some v' -> IntMap.add k v' acc
+        | _ -> acc
+      in
+      Some (IntMap.fold each sm IntMap.empty)
+    | Raw_blist l | Raw_tlist l | Raw_list l | List l ->
+      let rec each sm = function
+        | [] -> Some sm
+        | k :: v :: rest -> (
+          match uint k, f v with
           | Some ki, Some v' -> each (IntMap.add ki v' sm) rest
           | _ -> None
         )
@@ -816,7 +844,7 @@ module Read = struct
     | Raw_tlist (sizes :: vals)
     | Raw_list (sizes :: vals)
     | List (sizes :: vals) ->
-      let| sl = list int sizes in
+      let| sl = list uint sizes in
       Array.of_list vals |> map_array sl
     | _ -> None
   ;;
