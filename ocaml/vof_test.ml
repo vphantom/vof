@@ -1365,6 +1365,686 @@ let test_timestamp_offset () =
   then Alcotest.failf "offset: expected 1750750750 got %d" Timestamp.offset
 ;;
 
+(* === Codec Round-Trip Infrastructure === *)
+
+let make_test_ctx () =
+  let open Vof in
+  let ctx = Context.make ~update:true "com.test" in
+  let msg_schema =
+    Context.schema ctx
+      ~fields:
+        [
+          "orders", [ List_of "com.test.order" ];
+          "addresses", [ List_of "com.test.address" ];
+          "sales_report", [];
+          "matrix", [];
+          "nullable", [];
+        ]
+      "$msg"
+  in
+  let order_schema =
+    Context.schema ctx
+      ~fields:
+        [
+          "id", [ Key ];
+          "modified_at", [ Req ];
+          "name", [];
+          "active", [];
+          "total", [];
+          "ordered_on", [];
+          "shipped_at", [];
+          "created_ts", [];
+          "duration", [];
+          "weight", [];
+          "split", [];
+          "discount", [];
+          "price", [];
+          "sales_tax", [];
+          "qty", [];
+          "sku", [];
+          "lang", [];
+          "country", [];
+          "subdivision", [];
+          "curr", [];
+          "tax_code", [];
+          "measure_unit", [];
+          "description", [];
+          "ip_addr", [];
+          "network", [];
+          "coords", [];
+          "payload", [];
+          "tags", [];
+          "scores", [];
+          "flags", [];
+          "status", [];
+          "payment", [];
+          "lines", [];
+          "addresses", [];
+        ]
+      "order"
+  in
+  let line_schema =
+    Context.schema ctx
+      ~fields:[ "i", [ Key ]; "product", []; "qty", []; "unit_price", [] ]
+      "order.line"
+  in
+  let address_schema =
+    Context.schema ctx
+      ~fields:[ "id", [ Key ]; "street", []; "city", []; "zip", [] ]
+      "address"
+  in
+  let status_schema =
+    Context.schema ctx
+      ~fields:[ "Draft", []; "Confirmed", []; "Shipped", []; "Delivered", [] ]
+      "order.status"
+  in
+  let payment_schema =
+    Context.schema ctx
+      ~fields:[ "Cash", []; "Card", []; "Transfer", [] ]
+      "order.payment"
+  in
+  let sales_schema =
+    Context.schema ctx
+      ~fields:
+        [
+          "date", [];
+          "orders", [];
+          "revenue", [];
+          "tax", [];
+          "items", [];
+          "avg_order", [];
+        ]
+      "sales_report"
+  in
+  ( ctx,
+    msg_schema,
+    order_schema,
+    line_schema,
+    address_schema,
+    status_schema,
+    payment_schema,
+    sales_schema )
+;;
+
+let make_test_t
+  ( _,
+    msg_schema,
+    order_schema,
+    line_schema,
+    address_schema,
+    status_schema,
+    payment_schema,
+    sales_schema
+  ) =
+  let open Vof in
+  let sm = StringMap.empty in
+  let line1 =
+    Record
+      ( line_schema,
+        sm
+        |> StringMap.add "i" (Uint 1)
+        |> StringMap.add "product" (String "Widget")
+        |> StringMap.add "qty" (Decimal (10, 0))
+        |> StringMap.add "unit_price" (Decimal (599, 2))
+      )
+  in
+  let line2 =
+    Record
+      ( line_schema,
+        sm
+        |> StringMap.add "i" (Uint 2)
+        |> StringMap.add "product" (String "Gadget")
+        |> StringMap.add "qty" (Decimal (3, 0))
+        |> StringMap.add "unit_price" (Decimal (1299, 2))
+      )
+  in
+  let addr1 =
+    Record
+      ( address_schema,
+        sm
+        |> StringMap.add "id" (Uint 1)
+        |> StringMap.add "street" (String "123 Main St")
+        |> StringMap.add "city" (String "Montreal")
+        |> StringMap.add "zip" (String "H2X1A1")
+      )
+  in
+  let addr2 =
+    Record
+      ( address_schema,
+        sm
+        |> StringMap.add "id" (Uint 2)
+        |> StringMap.add "street" (String "456 Oak Ave")
+        |> StringMap.add "city" (String "Toronto")
+        |> StringMap.add "zip" (String "M5V2T6")
+      )
+  in
+  let order =
+    Record
+      ( order_schema,
+        sm
+        |> StringMap.add "id" (Uint 42)
+        |> StringMap.add "modified_at" (Timestamp 1750800000)
+        |> StringMap.add "name" (String "Test Order")
+        |> StringMap.add "active" (Bool true)
+        |> StringMap.add "total" (Decimal (12350, 2))
+        |> StringMap.add "ordered_on" (Date { year = 2025; month = 6; day = 15 })
+        |> StringMap.add "shipped_at"
+             (Datetime
+                { year = 2025; month = 6; day = 16; hour = 10; minute = 30 }
+             )
+        |> StringMap.add "created_ts" (Timestamp 1750750800)
+        |> StringMap.add "duration"
+             (Timespan { hmonths = 4; days = 3; secs = 0 })
+        |> StringMap.add "weight" (Float 3.14)
+        |> StringMap.add "split" (Ratio (1, 3))
+        |> StringMap.add "discount" (Percent (10, 0))
+        |> StringMap.add "price" (Amount ((9999, 2), Some "USD"))
+        |> StringMap.add "sales_tax" (Tax ((750, 2), "US_ST", Some "USD"))
+        |> StringMap.add "qty" (Quantity ((5, 0), Some "EA"))
+        |> StringMap.add "sku" (Code "ABC_123")
+        |> StringMap.add "lang" (Language "en")
+        |> StringMap.add "country" (Country "US")
+        |> StringMap.add "subdivision" (Subdivision "QC")
+        |> StringMap.add "curr" (Currency "USD")
+        |> StringMap.add "tax_code" (Tax_code "US_ST")
+        |> StringMap.add "measure_unit" (Unit "KGM")
+        |> StringMap.add "description"
+             (Text
+                (sm |> StringMap.add "en" "Test" |> StringMap.add "fr" "Essai")
+             )
+        |> StringMap.add "ip_addr" (Ip (Bytes.of_string "\xC0\xA8\x01\x01"))
+        |> StringMap.add "network"
+             (Subnet (Bytes.of_string "\x0A\x00\x00\x00", 8))
+        |> StringMap.add "coords" (Coords (45.5, -73.5))
+        |> StringMap.add "payload" (Data (Bytes.of_string "hello"))
+        |> StringMap.add "tags"
+             (Strmap
+                (sm
+                |> StringMap.add "priority" (String "high")
+                |> StringMap.add "source" (String "web")
+                )
+             )
+        |> StringMap.add "scores"
+             (Uintmap
+                (IntMap.empty
+                |> IntMap.add 1 (Int 100)
+                |> IntMap.add 2 (Int 200)
+                )
+             )
+        |> StringMap.add "flags" (List [ Bool true; Bool false; Bool true ])
+        |> StringMap.add "status" (Enum (status_schema, "Confirmed"))
+        |> StringMap.add "payment"
+             (Variant (payment_schema, "Card", [ String "visa" ]))
+        |> StringMap.add "lines" (List [ line1; line2 ])
+        |> StringMap.add "addresses"
+             (List
+                [
+                  Record (address_schema, StringMap.add "id" (Uint 1) sm);
+                  Record (address_schema, StringMap.add "id" (Uint 2) sm);
+                ]
+             )
+      )
+  in
+  let make_sales_row d orders revenue tax items avg =
+    ( sales_schema,
+      sm
+      |> StringMap.add "date" (Date d)
+      |> StringMap.add "orders" (Uint orders)
+      |> StringMap.add "revenue" (Decimal revenue)
+      |> StringMap.add "tax" (Decimal tax)
+      |> StringMap.add "items" (Uint items)
+      |> StringMap.add "avg_order" (Decimal avg) )
+  in
+  let sales_report =
+    Series
+      [
+        make_sales_row
+          { year = 2025; month = 6; day = 9 }
+          15 (45000, 2) (5850, 2) 42 (3000, 2);
+        make_sales_row
+          { year = 2025; month = 6; day = 10 }
+          22 (68500, 2) (8905, 2) 67 (3113, 2);
+        make_sales_row
+          { year = 2025; month = 6; day = 11 }
+          18 (52300, 2) (6799, 2) 51 (2905, 2);
+      ]
+  in
+  let matrix =
+    Ndarray ([ 2; 3 ], [| Int 1; Int 2; Int 3; Int 4; Int 5; Int 6 |])
+  in
+  Record
+    ( msg_schema,
+      sm
+      |> StringMap.add "orders" (List [ order ])
+      |> StringMap.add "addresses" (List [ addr1; addr2 ])
+      |> StringMap.add "sales_report" sales_report
+      |> StringMap.add "matrix" matrix
+      |> StringMap.add "nullable" Null
+    )
+;;
+
+let test_of_vof ctx
+  ( msg_schema,
+    order_schema,
+    line_schema,
+    address_schema,
+    status_schema,
+    payment_schema,
+    sales_schema
+  ) v =
+  let open Vof in
+  let require msg = function
+    | None -> Alcotest.fail msg
+    | Some x -> x
+  in
+  let get name sm =
+    match StringMap.find_opt name sm with
+    | None -> Alcotest.failf "missing field %S" name
+    | Some v -> v
+  in
+  let chk_uint name exp sm =
+    let got = require name (Read.uint (get name sm)) in
+    if got <> exp then Alcotest.failf "%s: expected %d got %d" name exp got
+  in
+  let chk_str name exp sm =
+    let got = require name (Read.string (get name sm)) in
+    if got <> exp then Alcotest.failf "%s: expected %S got %S" name exp got
+  in
+  let chk_dec name exp sm =
+    let got = require name (Read.decimal (get name sm)) in
+    if got <> exp
+    then
+      Alcotest.failf "%s: expected (%d,%d) got (%d,%d)" name (fst exp) (snd exp)
+        (fst got) (snd got)
+  in
+  (* Decode root $msg *)
+  let msg = require "decode $msg" (Read.record ctx msg_schema Option.some v) in
+  (* --- Orders --- *)
+  let orders =
+    require "decode orders"
+      (Read.list (Read.record ctx order_schema Option.some) (get "orders" msg))
+  in
+  let o =
+    match orders with
+    | [ o ] -> o
+    | _ -> Alcotest.failf "expected 1 order, got %d" (List.length orders)
+  in
+  chk_uint "id" 42 o;
+  let ts = require "modified_at" (Read.timestamp (get "modified_at" o)) in
+  if ts <> 1750800000
+  then Alcotest.failf "modified_at: expected 1750800000 got %d" ts;
+  chk_str "name" "Test Order" o;
+  let active = require "active" (Read.bool (get "active" o)) in
+  if active <> true then Alcotest.fail "active: expected true";
+  chk_dec "total" (1235, 1) o;
+  let d = require "ordered_on" (Read.date (get "ordered_on" o)) in
+  if d <> { year = 2025; month = 6; day = 15 }
+  then Alcotest.fail "ordered_on mismatch";
+  let dt = require "shipped_at" (Read.datetime (get "shipped_at" o)) in
+  if dt <> { year = 2025; month = 6; day = 16; hour = 10; minute = 30 }
+  then Alcotest.fail "shipped_at mismatch";
+  let ts2 = require "created_ts" (Read.timestamp (get "created_ts" o)) in
+  if ts2 <> 1750750800
+  then Alcotest.failf "created_ts: expected 1750750800 got %d" ts2;
+  let span = require "duration" (Read.timespan (get "duration" o)) in
+  if span <> { hmonths = 4; days = 3; secs = 0 }
+  then Alcotest.fail "duration mismatch";
+  let w = require "weight" (Read.float (get "weight" o)) in
+  if w <> 3.14 then Alcotest.fail "weight mismatch";
+  let r = require "split" (Read.ratio (get "split" o)) in
+  if r <> (1, 3) then Alcotest.fail "split mismatch";
+  let pct = require "discount" (Read.percent (get "discount" o)) in
+  if pct <> (10, 0) then Alcotest.fail "discount mismatch";
+  let amt = require "price" (Read.amount (get "price" o)) in
+  if amt <> ((9999, 2), Some "USD") then Alcotest.fail "price mismatch";
+  let tax = require "sales_tax" (Read.tax (get "sales_tax" o)) in
+  if tax <> ((75, 1), "US_ST", Some "USD")
+  then Alcotest.fail "sales_tax mismatch";
+  let qty = require "qty" (Read.quantity (get "qty" o)) in
+  if qty <> ((5, 0), Some "EA") then Alcotest.fail "qty mismatch";
+  let code = require "sku" (Read.code (get "sku" o)) in
+  if code <> "ABC_123" then Alcotest.failf "sku: expected ABC_123 got %s" code;
+  let lang = require "lang" (Read.language (get "lang" o)) in
+  if lang <> "en" then Alcotest.failf "lang: expected en got %s" lang;
+  let country = require "country" (Read.country (get "country" o)) in
+  if country <> "US" then Alcotest.failf "country: expected US got %s" country;
+  let subdiv = require "subdivision" (Read.subdivision (get "subdivision" o)) in
+  if subdiv <> "QC" then Alcotest.failf "subdivision: expected QC got %s" subdiv;
+  let curr = require "curr" (Read.currency (get "curr" o)) in
+  if curr <> "USD" then Alcotest.failf "curr: expected USD got %s" curr;
+  let tc = require "tax_code" (Read.tax_code (get "tax_code" o)) in
+  if tc <> "US_ST" then Alcotest.failf "tax_code: expected US_ST got %s" tc;
+  let u = require "measure_unit" (Read.unit_ (get "measure_unit" o)) in
+  if u <> "KGM" then Alcotest.failf "measure_unit: expected KGM got %s" u;
+  (* Text *)
+  let txt = require "description" (Read.text (get "description" o)) in
+  let en = require "description[en]" (StringMap.find_opt "en" txt) in
+  if en <> "Test" then Alcotest.failf "description[en]: expected Test got %s" en;
+  let fr = require "description[fr]" (StringMap.find_opt "fr" txt) in
+  if fr <> "Essai"
+  then Alcotest.failf "description[fr]: expected Essai got %s" fr;
+  (* IP *)
+  let ip = require "ip_addr" (Read.ip (get "ip_addr" o)) in
+  if ip <> Bytes.of_string "\xC0\xA8\x01\x01"
+  then Alcotest.fail "ip_addr mismatch";
+  (* Subnet *)
+  let net = require "network" (Read.subnet (get "network" o)) in
+  if net <> (Bytes.of_string "\x0A\x00\x00\x00", 8)
+  then Alcotest.fail "network mismatch";
+  (* Coords *)
+  let coords = require "coords" (Read.coords (get "coords" o)) in
+  if coords <> (45.5, -73.5) then Alcotest.fail "coords mismatch";
+  (* Data *)
+  let payload = require "payload" (Read.data (get "payload" o)) in
+  if payload <> Bytes.of_string "hello" then Alcotest.fail "payload mismatch";
+  (* Strmap *)
+  let tags = require "tags" (Read.strmap Read.string (get "tags" o)) in
+  let tp = require "tags[priority]" (StringMap.find_opt "priority" tags) in
+  if tp <> "high" then Alcotest.failf "tags[priority]: expected high got %s" tp;
+  let src = require "tags[source]" (StringMap.find_opt "source" tags) in
+  if src <> "web" then Alcotest.failf "tags[source]: expected web got %s" src;
+  (* Uintmap *)
+  let scores = require "scores" (Read.uintmap Read.int (get "scores" o)) in
+  let s1 = require "scores[1]" (IntMap.find_opt 1 scores) in
+  if s1 <> 100 then Alcotest.failf "scores[1]: expected 100 got %d" s1;
+  let s2 = require "scores[2]" (IntMap.find_opt 2 scores) in
+  if s2 <> 200 then Alcotest.failf "scores[2]: expected 200 got %d" s2;
+  (* List of bools *)
+  let flags = require "flags" (Read.list Read.bool (get "flags" o)) in
+  if flags <> [ true; false; true ] then Alcotest.fail "flags mismatch";
+  (* Enum *)
+  let status =
+    require "status"
+      (Read.variant ctx status_schema
+         (fun name _args -> Some name)
+         (get "status" o)
+      )
+  in
+  if status <> "Confirmed"
+  then Alcotest.failf "status: expected Confirmed got %s" status;
+  (* Variant *)
+  let payment =
+    require "payment"
+      (Read.variant ctx payment_schema
+         (fun name args ->
+           match name, args with
+           | "Card", [ arg ] -> Read.string arg
+           | n, [] -> Some n
+           | _ -> None
+         )
+         (get "payment" o)
+      )
+  in
+  if payment <> "visa"
+  then Alcotest.failf "payment: expected visa got %s" payment;
+  (* Lines (dependent children) *)
+  let lines =
+    require "lines"
+      (Read.list (Read.record ctx line_schema Option.some) (get "lines" o))
+  in
+  ( match lines with
+  | [ l1; l2 ] ->
+    chk_uint "i" 1 l1;
+    chk_str "product" "Widget" l1;
+    chk_dec "qty" (10, 0) l1;
+    chk_dec "unit_price" (599, 2) l1;
+    chk_uint "i" 2 l2;
+    chk_str "product" "Gadget" l2;
+    chk_dec "qty" (3, 0) l2;
+    chk_dec "unit_price" (1299, 2) l2
+  | _ -> Alcotest.failf "expected 2 lines, got %d" (List.length lines)
+  );
+  (* Order addresses (references) *)
+  let oaddrs =
+    require "order.addresses"
+      (Read.list
+         (Read.record ctx address_schema Option.some)
+         (get "addresses" o)
+      )
+  in
+  ( match oaddrs with
+  | [ a1; a2 ] -> chk_uint "id" 1 a1; chk_uint "id" 2 a2
+  | _ -> Alcotest.failf "expected 2 order addr refs, got %d" (List.length oaddrs)
+  );
+  (* --- $msg Addresses --- *)
+  let addrs =
+    require "msg.addresses"
+      (Read.list
+         (Read.record ctx address_schema Option.some)
+         (get "addresses" msg)
+      )
+  in
+  ( match addrs with
+  | [ a1; a2 ] ->
+    chk_uint "id" 1 a1;
+    chk_str "street" "123 Main St" a1;
+    chk_str "city" "Montreal" a1;
+    chk_str "zip" "H2X1A1" a1;
+    chk_uint "id" 2 a2;
+    chk_str "street" "456 Oak Ave" a2;
+    chk_str "city" "Toronto" a2;
+    chk_str "zip" "M5V2T6" a2
+  | _ -> Alcotest.failf "expected 2 msg addresses, got %d" (List.length addrs)
+  );
+  (* --- Sales Report (Series) --- *)
+  let sales =
+    require "sales_report"
+      (Read.series ctx sales_schema Option.some (get "sales_report" msg))
+  in
+  ( match sales with
+  | [ r1; r2; r3 ] ->
+    let chk_row name row exp_d exp_ord exp_rev exp_tax exp_items exp_avg =
+      let d = require (name ^ ".date") (Read.date (get "date" row)) in
+      if d <> exp_d then Alcotest.failf "%s.date mismatch" name;
+      chk_uint "orders" exp_ord row;
+      chk_dec "revenue" exp_rev row;
+      chk_dec "tax" exp_tax row;
+      chk_uint "items" exp_items row;
+      chk_dec "avg_order" exp_avg row
+    in
+    chk_row "sales[0]" r1
+      { year = 2025; month = 6; day = 9 }
+      15 (450, 0) (585, 1) 42 (30, 0);
+    chk_row "sales[1]" r2
+      { year = 2025; month = 6; day = 10 }
+      22 (685, 0) (8905, 2) 67 (3113, 2);
+    chk_row "sales[2]" r3
+      { year = 2025; month = 6; day = 11 }
+      18 (523, 0) (6799, 2) 51 (2905, 2)
+  | _ -> Alcotest.failf "expected 3 sales rows, got %d" (List.length sales)
+  );
+  (* --- Matrix (Ndarray) --- *)
+  let dims, arr = require "matrix" (Read.ndarray Read.int (get "matrix" msg)) in
+  if dims <> [ 2; 3 ] then Alcotest.fail "matrix dims mismatch";
+  if arr <> [| 1; 2; 3; 4; 5; 6 |] then Alcotest.fail "matrix values mismatch";
+  (* --- Nullable --- *)
+  match Read.uint (get "nullable" msg) with
+  | None -> ()
+  | Some n -> Alcotest.failf "nullable: expected None, got Some %d" n
+;;
+
+let test_codec_base () =
+  let ( (ctx, msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s) as
+        all
+      ) =
+    make_test_ctx ()
+  in
+  let schemas = msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s in
+  let v = make_test_t all in
+  test_of_vof ctx schemas v
+;;
+
+let test_codec_json () =
+  let ( (ctx, msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s) as
+        all
+      ) =
+    make_test_ctx ()
+  in
+  let schemas = msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s in
+  let v = make_test_t all in
+  let json = Vof_json.of_vof ctx v in
+  let decoded = Vof_json.to_raw json in
+  test_of_vof ctx schemas decoded
+;;
+
+let test_codec_cbor () =
+  let ( (ctx, msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s) as
+        all
+      ) =
+    make_test_ctx ()
+  in
+  let schemas = msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s in
+  let v = make_test_t all in
+  let encoded = Vof_cbor.encode_str ctx v in
+  let decoded, _len =
+    match Vof_cbor.decode encoded with
+    | Some x -> x
+    | None -> Alcotest.fail "CBOR decode returned None"
+  in
+  test_of_vof ctx schemas decoded
+;;
+
+let test_codec_bin () =
+  let ( (ctx, msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s) as
+        all
+      ) =
+    make_test_ctx ()
+  in
+  let schemas = msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s in
+  let v = make_test_t all in
+  let encoded = Vof_bin.encode_str ctx v in
+  let decoded, _len =
+    match Vof_bin.decode encoded with
+    | Some x -> x
+    | None -> Alcotest.fail "Binary decode returned None"
+  in
+  test_of_vof ctx schemas decoded
+;;
+
+let test_codec_cbor_magic () =
+  let ( (ctx, msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s) as
+        all
+      ) =
+    make_test_ctx ()
+  in
+  let schemas = msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s in
+  let v = make_test_t all in
+  let encoded = Vof_cbor.encode_str ctx ~magic:true v in
+  let decoded, _len =
+    match Vof_cbor.decode encoded with
+    | Some x -> x
+    | None -> Alcotest.fail "CBOR magic decode returned None"
+  in
+  test_of_vof ctx schemas decoded
+;;
+
+let test_equal_is_ref_make_ref () =
+  let open Vof in
+  let all = make_test_ctx () in
+  let _, _, order_schema, _, address_schema, _, _, _ = all in
+  let v = make_test_t all in
+  (* equal: identical values *)
+  let v2 = make_test_t all in
+  if not (equal v v2) then Alcotest.fail "equal: identical msg should be equal";
+  (* equal: modified value *)
+  let sm = StringMap.empty in
+  let modified =
+    Record
+      ( address_schema,
+        sm
+        |> StringMap.add "id" (Uint 1)
+        |> StringMap.add "street" (String "CHANGED")
+        |> StringMap.add "city" (String "Montreal")
+        |> StringMap.add "zip" (String "H2X1A1")
+      )
+  in
+  let original =
+    Record
+      ( address_schema,
+        sm
+        |> StringMap.add "id" (Uint 1)
+        |> StringMap.add "street" (String "123 Main St")
+        |> StringMap.add "city" (String "Montreal")
+        |> StringMap.add "zip" (String "H2X1A1")
+      )
+  in
+  if equal modified original
+  then Alcotest.fail "equal: modified addr should not equal original";
+  (* is_ref: full address record → not a ref *)
+  ( match original with
+  | Record r ->
+    if is_ref r then Alcotest.fail "is_ref: full address should not be a ref"
+  | _ -> Alcotest.fail "expected Record"
+  );
+  (* is_ref: address with only key → is a ref *)
+  let addr_ref = address_schema, StringMap.add "id" (Uint 1) StringMap.empty in
+  if not (is_ref addr_ref)
+  then Alcotest.fail "is_ref: address with only id should be a ref";
+  (* make_ref: order record stripped to key + req *)
+  match v with
+  | Record (_, msg_fields) -> (
+    match StringMap.find_opt "orders" msg_fields with
+    | Some (List [ Record (_, ofields) ]) ->
+      let order_rec = order_schema, ofields in
+      let r = make_ref order_rec in
+      if not (is_ref r) then Alcotest.fail "make_ref result should be a ref";
+      let _, rfields = r in
+      (* Should have key "id" and req "modified_at" *)
+      if not (StringMap.mem "id" rfields)
+      then Alcotest.fail "make_ref: missing key field id";
+      if not (StringMap.mem "modified_at" rfields)
+      then Alcotest.fail "make_ref: missing req field modified_at";
+      (* Should not have other fields *)
+      if StringMap.mem "name" rfields
+      then Alcotest.fail "make_ref: should not have 'name'"
+    | _ -> Alcotest.fail "could not extract order from msg"
+  )
+  | _ -> Alcotest.fail "expected Record at top level"
+;;
+
+let test_pp_smoke () =
+  let open Vof in
+  let all = make_test_ctx () in
+  let v = make_test_t all in
+  (* pp on various scalars shouldn't crash and should be non-empty *)
+  let check_nonempty label x =
+    let s = pp x in
+    if String.length s = 0
+    then Alcotest.failf "pp %s returned empty string" label
+  in
+  check_nonempty "Null" Null;
+  check_nonempty "Bool" (Bool true);
+  check_nonempty "Int" (Int 42);
+  check_nonempty "Uint" (Uint 7);
+  check_nonempty "Float" (Float 3.14);
+  check_nonempty "String" (String "hello");
+  check_nonempty "Decimal" (Decimal (1235, 1));
+  check_nonempty "Date" (Date { year = 2025; month = 6; day = 15 });
+  check_nonempty "Timestamp" (Timestamp 1750800000);
+  check_nonempty "Code" (Code "ABC");
+  check_nonempty "Currency" (Currency "USD");
+  (* pp on the full msg record *)
+  check_nonempty "msg Record" v;
+  (* pp_ref on a full order *)
+  ( match v with
+  | Record (_, msg_fields) -> (
+    match StringMap.find_opt "orders" msg_fields with
+    | Some (List [ Record r ]) ->
+      let s = pp_ref r in
+      if String.length s = 0
+      then Alcotest.fail "pp_ref on order returned empty string"
+    | _ -> Alcotest.fail "could not extract order"
+  )
+  | _ -> Alcotest.fail "expected Record"
+  );
+  (* pp_ref on a reference *)
+  let _, _, _, _, address_schema, _, _, _ = all in
+  let addr_ref = address_schema, StringMap.add "id" (Uint 1) StringMap.empty in
+  let s = pp_ref addr_ref in
+  if String.length s = 0
+  then Alcotest.fail "pp_ref on addr ref returned empty string"
+;;
+
 let () =
   Alcotest.run "vof"
     [
@@ -1461,6 +2141,21 @@ let () =
             test_decimal_to_string_known;
           Alcotest.test_case "of_string ~shift" `Quick
             test_decimal_of_string_shift;
+        ] );
+      ( "Codec base",
+        [ Alcotest.test_case "roundtrip typed" `Quick test_codec_base ] );
+      "JSON codec", [ Alcotest.test_case "roundtrip" `Quick test_codec_json ];
+      ( "CBOR codec",
+        [
+          Alcotest.test_case "roundtrip" `Quick test_codec_cbor;
+          Alcotest.test_case "roundtrip with magic" `Quick test_codec_cbor_magic;
+        ] );
+      "Binary codec", [ Alcotest.test_case "roundtrip" `Quick test_codec_bin ];
+      ( "Structural",
+        [
+          Alcotest.test_case "equal, is_ref, make_ref" `Quick
+            test_equal_is_ref_make_ref;
+          Alcotest.test_case "pp smoke" `Quick test_pp_smoke;
         ] );
     ]
 ;;
