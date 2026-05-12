@@ -21,6 +21,36 @@ Development dependencies add:
 * `bisect-ppx`
 * `qcheck` and `qcheck-alcotest`
 
+## Installation
+
+This package is not published on OPAM.  Two common approaches are:
+
+### OPAM Pin
+
+To install as a normal switch-level package pinned to a specific version:
+
+```sh
+opam pin add ocaml-vof 'git+https://github.com/vphantom/vof.git#v1.0.0'
+```
+
+Then add `ocaml-vof` to your `.opam` file's `depends` section.
+
+### Vendored Submodule
+
+Add this repository as a git submodule and let Dune discover it:
+
+```sh
+git submodule add https://github.com/vphantom/vof.git vendor/vof
+```
+
+In your project's root `dune` file, you probably want to suppress warnings from vendored code:
+
+```
+(vendored_dirs vendor)
+```
+
+Your libraries and executables can then depend on `vof` and `vof_lib` directly.
+
 ## Implementation Notes
 
 * We use native `int` integers, which means that we cannot I/O full 64-bit.  Good compromise for business applications, not for things like IPv4 or truncated UUID values.
