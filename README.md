@@ -46,8 +46,12 @@ Version 1.0 — 2026-05-09
 
 ## ROADMAP
 
-- [ ] Create data files to help test all implementations
-- [ ] OCaml tests for 80% coverage
+- [x] Full reference implementation in OCaml
+- [x] Client/JSON implementation in Perl 5
+- [ ] Client/JSON implementation in JavaScript
+- [ ] Client/JSON implementation in PHP 8
+- [ ] Client/JSON implementation in Python 3
+- [ ] Benchmarks to start monitoring performance
 
 ## SPECIFICATIONS
 
@@ -73,6 +77,8 @@ Version 1.0 — 2026-05-09
 ## ACKNOWLEDGEMENTS
 
 Graph X Design Inc. https://www.gxd.ca/ sponsored part of this project.
+
+Test suites and additional language ports were built with the closely supervised help of LLM tools.
 
 ## LICENSE AND COPYRIGHT
 

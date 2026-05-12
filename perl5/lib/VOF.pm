@@ -72,7 +72,7 @@ use warnings;
 use Carp qw(croak);
 use Exporter qw(import);
 use MIME::Base64 qw(decode_base64url);
-use Socket qw(AF_INET AF_INET6 inet_pton);
+use Socket qw(AF_INET AF_INET6 inet_ntop inet_pton);
 
 our $VERSION = '0.01';
 
@@ -99,6 +99,7 @@ BEGIN {
 		VOF_STRMAP VOF_UINTMAP VOF_LIST VOF_NDARRAY
 		VOF_RECORD VOF_SERIES
 		VOF_RAW_TINT VOF_RAW_TSTR VOF_RAW_TLIST
+		VOF_FMT_GZIP VOF_FMT_ZSTD VOF_FMT_JSON VOF_FMT_CBOR VOF_FMT_BINARY
 	)) {
 		constant->import({ $name => $i++ });
 	}
@@ -121,6 +122,7 @@ my @CONSTANTS = qw(
 	VOF_STRMAP VOF_UINTMAP VOF_LIST VOF_NDARRAY
 	VOF_RECORD VOF_SERIES
 	VOF_RAW_TINT VOF_RAW_TSTR VOF_RAW_TLIST
+	VOF_FMT_GZIP VOF_FMT_ZSTD VOF_FMT_JSON VOF_FMT_CBOR VOF_FMT_BINARY
 );
 
 my @CONSTRUCTORS = qw(
@@ -155,6 +157,9 @@ my @HELPERS = qw(
 	ratio_of_string ratio_to_string
 	date_of_human date_to_human
 	datetime_of_human datetime_to_human
+	detect_format
+	is_ref make_ref
+	pp pp_ref
 );
 
 our @EXPORT_OK = (@CONSTANTS, @CONSTRUCTORS, @READERS, @HELPERS);
@@ -393,12 +398,13 @@ package VOF::Context {
 				}
 			}
 			else {
-				if (index($line, $root_prefix) == 0) {
-					$current_ns = $line;
+				my ($path) = split /\s+/, $line;
+				if (index($path, $root_prefix) == 0) {
+					$current_ns = $path;
 				}
 				else {
 					Carp::carp(
-						"VOF::Context: skipping namespace '$line'"
+						"VOF::Context: skipping namespace '$path'"
 						. " outside root '$self->{root}' in '$file_path'"
 					);
 					$current_ns = undef;
@@ -700,6 +706,219 @@ Returns the C<YYYYMMDDHHMM> integer.
 sub datetime_to_human {
 	my ($y, $m, $d, $hh, $mm) = @_;
 	return $y * 100_000_000 + $m * 1_000_000 + $d * 10_000 + $hh * 100 + $mm;
+}
+
+=back
+
+=head2 Format Detection
+
+=over 4
+
+=item C<detect_format( $str )>
+
+Inspects the first byte of C<$str> to determine its wire format.  Returns one of
+the C<VOF_FMT_*> constants (C<VOF_FMT_GZIP>, C<VOF_FMT_ZSTD>, C<VOF_FMT_JSON>,
+C<VOF_FMT_CBOR>, C<VOF_FMT_BINARY>) or C<undef> for unrecognized input.
+
+C<$str> may be a single byte or a longer buffer; only the first byte is
+examined.
+
+=cut
+
+sub detect_format {
+	my ($str) = @_;
+	return undef unless defined $str && length $str;
+	my $c = ord($str);
+	return VOF_FMT_GZIP   if $c == 0x1F;
+	return VOF_FMT_ZSTD   if $c == 0x28;
+	return VOF_FMT_JSON   if $c == 0x5B || $c == 0x6E || $c == 0x7B;
+	return VOF_FMT_CBOR   if ($c >= 0x80 && $c <= 0xDB) || $c == 0xF6;
+	return VOF_FMT_BINARY if ($c >= 0xE8 && $c <= 0xF3)
+		|| ($c >= 0xFA && $c <= 0xFD);
+	return undef;
+}
+
+=back
+
+=head2 Record Helpers
+
+=over 4
+
+=item C<is_ref( $v )>
+
+Returns true if C<$v> is a C<VOF_RECORD> containing only key and required
+fields (i.e. a reference rather than a full record).  Returns false for
+non-record values.
+
+=cut
+
+sub is_ref {
+	my ($v) = @_;
+	return 0 unless ref $v eq 'VOF::Value' && $v->[0] == VOF_RECORD;
+	return $v->[1]->is_reference($v->[2]) ? 1 : 0;
+}
+
+=item C<make_ref( $v )>
+
+Returns a new C<VOF_RECORD> containing only the key and required fields of
+C<$v>, stripping all other fields.  Returns C<undef> if C<$v> is not a record.
+
+=cut
+
+sub make_ref {
+	my ($v) = @_;
+	return undef unless ref $v eq 'VOF::Value' && $v->[0] == VOF_RECORD;
+	my $schema = $v->[1];
+	my %allowed = map { $_ => 1 } @{$schema->{keys}}, @{$schema->{required}};
+	my %filtered;
+	for my $k (keys %{$v->[2]}) {
+		$filtered{$k} = $v->[2]{$k} if $allowed{$k};
+	}
+	return VOF::Value->new(VOF_RECORD, $schema, \%filtered);
+}
+
+=back
+
+=head2 Pretty Printing
+
+=over 4
+
+=item C<pp( $v )>
+
+Returns a human-readable string representation of a VOF value.  Handles all
+scalar and structured types that have a natural textual form; returns C<"?"> for
+collections (lists, maps, ndarrays, series), raw types and non-VOF inputs.
+Records delegate to L</pp_ref>.
+
+=cut
+
+# Internal: format 4 or 16 raw bytes as IPv4/IPv6 string, '?' on error.
+sub _pp_ip {
+	my ($bytes) = @_;
+	my $len = length $bytes;
+	if ($len == 4) {
+		return eval { inet_ntop(AF_INET, $bytes) } // '?';
+	}
+	if ($len == 16) {
+		return eval { inet_ntop(AF_INET6, $bytes) } // '?';
+	}
+	return '?';
+}
+
+sub pp {
+	my ($v) = @_;
+	return '?' unless ref $v eq 'VOF::Value';
+	my $t = $v->[0];
+
+	return 'NULL' if $t == VOF_NULL;
+	if ($t == VOF_BOOL) { return $v->[1] ? 'TRUE' : 'FALSE' }
+	if ($t == VOF_INT || $t == VOF_UINT || $t == VOF_TIMESTAMP) {
+		return "$v->[1]";
+	}
+	if ($t == VOF_FLOAT) { return "$v->[1]" }
+	if ($t == VOF_STRING) {
+		my $s = $v->[1];
+		$s =~ s/\\/\\\\/g;
+		$s =~ s/"/\\"/g;
+		$s =~ s/\n/\\n/g;
+		$s =~ s/\r/\\r/g;
+		$s =~ s/\t/\\t/g;
+		return qq{"$s"};
+	}
+	if ($t == VOF_CODE || $t == VOF_LANGUAGE || $t == VOF_COUNTRY
+		|| $t == VOF_SUBDIVISION || $t == VOF_CURRENCY
+		|| $t == VOF_TAX_CODE || $t == VOF_UNIT) {
+		return $v->[1];
+	}
+	if ($t == VOF_DECIMAL) {
+		return decimal_to_string($v->[1], $v->[2]);
+	}
+	if ($t == VOF_RATIO) {
+		return ratio_to_string($v->[1], $v->[2]);
+	}
+	if ($t == VOF_PERCENT) {
+		return decimal_to_string($v->[1] * 100, $v->[2]) . '%';
+	}
+	if ($t == VOF_DATE) {
+		return sprintf('%04d-%02d-%02d', $v->[1], $v->[2], $v->[3]);
+	}
+	if ($t == VOF_DATETIME) {
+		return sprintf('%04d-%02d-%02dT%02d:%02d',
+			$v->[1], $v->[2], $v->[3], $v->[4], $v->[5]);
+	}
+	if ($t == VOF_TIMESPAN) {
+		return sprintf('timespan[%d,%d,%d]', $v->[1], $v->[2], $v->[3]);
+	}
+	if ($t == VOF_ENUM) { return $v->[2] }
+	if ($t == VOF_VARIANT) {
+		return $v->[2] unless @{$v->[3]};
+		my $a = join(',', map { pp($_) } @{$v->[3]});
+		return "$v->[2]($a)";
+	}
+	if ($t == VOF_AMOUNT) {
+		my $s = decimal_to_string($v->[1], $v->[2]);
+		$s .= $v->[3] if defined $v->[3];
+		return $s;
+	}
+	if ($t == VOF_TAX) {
+		my $s = decimal_to_string($v->[1], $v->[2]);
+		$s .= $v->[4] if defined $v->[4];
+		$s .= $v->[3];
+		return $s;
+	}
+	if ($t == VOF_QUANTITY) {
+		my $s = decimal_to_string($v->[1], $v->[2]);
+		$s .= $v->[3] if defined $v->[3];
+		return $s;
+	}
+	if ($t == VOF_COORDS) {
+		return sprintf('(%g,%g)', $v->[1], $v->[2]);
+	}
+	if ($t == VOF_IP) {
+		return _pp_ip($v->[1]);
+	}
+	if ($t == VOF_SUBNET) {
+		return _pp_ip($v->[1]) . '/' . $v->[2];
+	}
+	if ($t == VOF_RECORD) {
+		return pp_ref($v);
+	}
+	return '?';
+}
+
+=item C<pp_ref( $v )>
+
+Returns a string representation of a record as
+C<"path(key1,key2;required1,required2)"> where key values are followed by
+required values, both in the order declared in the schema.  A non-reference
+record (one with fields beyond keys and required) appends C<";..."> to indicate
+additional fields are present.  Returns C<"?"> for non-record inputs.
+
+=cut
+
+sub pp_ref {
+	my ($v) = @_;
+	return '?' unless ref $v eq 'VOF::Value' && $v->[0] == VOF_RECORD;
+	my $schema = $v->[1];
+	my $fields = $v->[2];
+	my $buf = $schema->{path} . '(';
+	my $first = 1;
+	for my $k (@{$schema->{keys}}) {
+		$buf .= ',' unless $first;
+		$first = 0;
+		$buf .= exists $fields->{$k} ? pp($fields->{$k}) : 'NULL';
+	}
+	if (@{$schema->{required}}) {
+		$buf .= ';';
+		for my $k (@{$schema->{required}}) {
+			$buf .= ',' unless $first;
+			$first = 0;
+			$buf .= exists $fields->{$k} ? pp($fields->{$k}) : 'NULL';
+		}
+	}
+	$buf .= ';...' unless is_ref($v);
+	$buf .= ')';
+	return $buf;
 }
 
 =back
@@ -1381,6 +1600,15 @@ sub as_string {
 	if ($t == VOF_INT || $t == VOF_UINT || $t == VOF_RAW_TINT) {
 		return "$v->[1]";
 	}
+	if ($t == VOF_FLOAT) {
+		return "$v->[1]";
+	}
+	if ($t == VOF_DECIMAL) {
+		return decimal_to_string($v->[1], $v->[2]);
+	}
+	if ($t == VOF_RATIO) {
+		return ratio_to_string($v->[1], $v->[2]);
+	}
 	return undef;
 }
 
@@ -1395,8 +1623,11 @@ sub as_data {
 	return undef unless ref $v eq 'VOF::Value';
 	my $t = $v->[0];
 	if ($t == VOF_DATA) { return $v->[1] }
-	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+	if ($t == VOF_RAW_TSTR) {
 		return decode_base64url($v->[1]);
+	}
+	if ($t == VOF_STRING) {
+		return $v->[1];
 	}
 	return undef;
 }
@@ -2015,7 +2246,7 @@ sub as_ndarray {
 	if ($t == VOF_RAW_TLIST || $t == VOF_LIST) {
 		my $items = $v->[1];
 		return undef unless @$items >= 1;
-		my $shape = as_list($items->[0], \&as_int);
+		my $shape = as_list($items->[0], \&as_uint);
 		return undef unless defined $shape;
 		my $expected = 1;
 		$expected *= $_ for @$shape;

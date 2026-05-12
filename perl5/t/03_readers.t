@@ -101,16 +101,19 @@ subtest 'as_string' => sub {
 	is(as_string(vof_currency("USD")), "USD", "currency → string");
 	is(as_string(vof_uint(10)), "10", "uint stringified");
 	is(as_string(raw_int(77)), "77", "raw int stringified");
-	is(as_string(vof_float(1.5)), undef, "float → undef");
+	is(as_string(vof_float(1.5)), "1.5", "float → string");
+	is(as_string(vof_decimal("12.50")), "12.5", "decimal → string");
+	is(as_string(vof_ratio(3, 4)), "3/4", "ratio → string");
 };
 
 # ===== as_data =====
 
 subtest 'as_data' => sub {
 	is(as_data(vof_data("\x00\xFF")), "\x00\xFF", "typed data passthrough");
-	# base64url round-trip: "AAAA" decodes to "\x00\x00\x00"
+	# base64url decode only from raw wire strings
 	is(as_data(raw_str("AAAA")), "\x00\x00\x00", "base64url decode from raw_str");
-	is(as_data(vof_string("AAAA")), "\x00\x00\x00", "base64url decode from typed string");
+	# typed strings pass through as-is (already known data)
+	is(as_data(vof_string("hello")), "hello", "typed string passthrough");
 	is(as_data(raw_int(42)), undef, "int → undef");
 };
 
