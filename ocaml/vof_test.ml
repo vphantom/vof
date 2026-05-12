@@ -1,4 +1,3 @@
-
 module Decimal = Vof_lib.Decimal
 module Ratio = Vof_lib.Ratio
 module Date = Vof_lib.Date
@@ -381,6 +380,24 @@ let test_context_schema_redefine_update () =
   let saved2 = read_file path in
   Alcotest.(check string)
     "file unchanged after identical re-declaration" saved1 saved2;
+  let _ =
+    Vof.Context.schema ctx
+      ~fields:
+        [
+          "id", [ Key ];
+          "updated_at", [ Req ];
+          "items", [ List_of "com.test.gizmo.item" ];
+          "label", [ Other ("indexed", None) ];
+          "meta", [ Other ("format", Some "xml") ];
+          (* was "json" *)
+          "value", [];
+        ]
+      "gizmo"
+  in
+  Vof.Context.save ctx;
+  let saved2b = read_file path in
+  if saved2b = saved2
+  then Alcotest.fail "expected file to change after Other qualifier update";
   (* Update: promote "value" to Req and add new field "extra" *)
   let s2 =
     Vof.Context.schema ctx
@@ -404,6 +421,101 @@ let test_context_schema_redefine_update () =
   let saved3 = read_file path in
   if saved3 = saved2
   then Alcotest.fail "expected file to change after schema update"
+;;
+
+let test_context_schema_evolution () =
+  let path = tmp_symtable () in
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  Vof.Context.load ctx path;
+  (* Initial declaration *)
+  let _ =
+    Vof.Context.schema ctx
+      ~fields:
+        [
+          "id", [ Key ];
+          "name", [ Req ];
+          "items", [ List_of "com.test.evo.item" ];
+          "label", [];
+        ]
+      "evo"
+  in
+  List.iter
+    (fun s -> ignore (Vof.Context.lookup_id ctx "com.test.evo" s))
+    [ "id"; "name"; "items"; "label" ];
+  (* Redefine: flip is_key, change list_of → lines 232, 242 *)
+  let s =
+    Vof.Context.schema ctx
+      ~fields:
+        [
+          "id", [];
+          (* was Key → not Key *)
+          "name", [ Key ];
+          (* was Req → Key *)
+          "items", [ List_of "com.test.evo.item2" ];
+          (* changed list_of *)
+          "label", [];
+        ]
+      "evo"
+  in
+  if List.mem "id" s.keys then Alcotest.fail "id should not be key after flip";
+  if not (List.mem "name" s.keys) then Alcotest.fail "name should be key";
+  (* Redefine dropping "name" and "label" → line 264 (update_kr clears key) *)
+  let s2 =
+    Vof.Context.schema ctx ~fields:[ "id", [ Key ]; "items", [] ] "evo"
+  in
+  if not (List.mem "id" s2.keys) then Alcotest.fail "id key after drop";
+  if List.mem "name" s2.keys then Alcotest.fail "name lost key after drop";
+  (* idx_lookup on unregistered path → lines 304-305, 310 *)
+  let idx = Vof.Context.idx_lookup ctx "com.test.fresh" in
+  let _ = Vof.Context.idx_id ctx idx "sym" in
+  Alcotest.(check (option string))
+    "fresh idx sym" (Some "sym")
+    (Vof.Context.idx_sym idx 0)
+;;
+
+let test_context_ns_qualifiers_save_load () =
+  let path = tmp_symtable () in
+  (* Write a file with namespace qualifiers and a duplicate namespace (line
+     321) *)
+  let contents =
+    "# VOF Symbol Table\n\n\
+     com.test.nsq.thing internal deprecated\n\
+     \tid\n\n\
+     com.test.nsq.thing internal deprecated\n\
+     \tname\n"
+  in
+  Out_channel.with_open_bin path (fun oc -> output_string oc contents);
+  (* Load: duplicate namespace triggers lookup_create Some case *)
+  let ctx = Vof.Context.make ~update:true "com.test.nsq" in
+  Vof.Context.load ctx path;
+  (* Verify both symbols loaded *)
+  let id = Vof.Context.lookup_id ctx "com.test.nsq.thing" "id" in
+  let name = Vof.Context.lookup_id ctx "com.test.nsq.thing" "name" in
+  Alcotest.(check int) "id" 0 id;
+  Alcotest.(check int) "name" 1 name;
+  (* Add a symbol to force modification, then save *)
+  let _ = Vof.Context.lookup_id ctx "com.test.nsq.thing" "extra" in
+  Vof.Context.save ctx;
+  (* Verify ns qualifiers survived save → line 407 *)
+  let saved =
+    let ic = open_in path in
+    let s = In_channel.input_all ic in
+    close_in ic; s
+  in
+  let has sub =
+    let rec check i =
+      if i > String.length saved - String.length sub
+      then false
+      else if String.sub saved i (String.length sub) = sub
+      then true
+      else check (i + 1)
+    in
+    check 0
+  in
+  if not (has " deprecated")
+  then Alcotest.failf "qualifier 'deprecated' lost in save:\n%s" saved;
+  if not (has " internal")
+  then Alcotest.failf "qualifier 'internal' lost in save:\n%s" saved
 ;;
 
 let pow10 n =
@@ -2113,6 +2225,52 @@ let test_json_large_int () =
   | None -> Alcotest.fail "large neg roundtrip: Read.int returned None"
 ;;
 
+let test_json_series_missing_field () =
+  let open Vof in
+  let ctx = Context.make ~update:true "com.test.sparse" in
+  let schema = Context.schema ctx ~fields:[ "a", []; "b", []; "c", [] ] "row" in
+  let sm = StringMap.empty in
+  (* Row 1 has all fields, Row 2 is missing "b" *)
+  let row1 =
+    ( schema,
+      sm
+      |> StringMap.add "a" (Uint 1)
+      |> StringMap.add "b" (Uint 2)
+      |> StringMap.add "c" (Uint 3) )
+  in
+  let row2 =
+    schema, sm |> StringMap.add "a" (Uint 4) |> StringMap.add "c" (Uint 6)
+  in
+  let series = Series [ row1; row2 ] in
+  let json = Vof_json.of_vof ctx series in
+  let decoded = Vof_json.to_raw json in
+  let rows =
+    match Read.series ctx schema Option.some decoded with
+    | Some r -> r
+    | None -> Alcotest.fail "sparse series decode failed"
+  in
+  match rows with
+  | [ r1; r2 ] -> (
+    (* Row 1: all fields present *)
+    let v = StringMap.find_opt "b" r1 in
+    ( match Option.bind v Read.uint with
+    | Some 2 -> ()
+    | _ -> Alcotest.fail "row1.b should be 2"
+    );
+    (* Row 2: missing "b" should come back as Null *)
+    match StringMap.find_opt "b" r2 with
+    | Some Null | None -> ()
+    | Some other -> Alcotest.failf "row2.b should be Null, got %s" (pp other)
+  )
+  | _ -> Alcotest.failf "expected 2 rows, got %d" (List.length rows)
+;;
+
+let test_json_empty_series () =
+  let ctx = Vof.Context.make ~update:true "com.test.es" in
+  let j = Vof_json.of_vof ctx (Vof.Series []) in
+  Alcotest.(check bool) "empty series → `List []" true (j = `List [])
+;;
+
 let test_codec_json () =
   let ( (ctx, msg_s, order_s, line_s, addr_s, status_s, payment_s, sales_s) as
         all
@@ -2158,6 +2316,130 @@ let test_codec_bin () =
     | None -> Alcotest.fail "Binary decode returned None"
   in
   test_of_vof ctx schemas decoded
+;;
+
+let test_codec_bin_coverage () =
+  let open Vof in
+  let ctx = Context.make ~update:true "com.test.bincov" in
+  let require msg = function
+    | None -> Alcotest.fail msg
+    | Some x -> x
+  in
+  (* encode_buf with provided buffer *)
+  let buf = Buffer.create 16 in
+  let buf' = Vof_bin.encode_buf ctx ~buf (Uint 42) in
+  if buf' != buf then Alcotest.fail "encode_buf should reuse buffer";
+  (* Raw_gap 0: write_gap no-op branch *)
+  let buf = Buffer.create 4 in
+  ignore (Vof_bin.encode_buf ctx ~buf (Raw_gap 0));
+  if Buffer.length buf <> 0 then Alcotest.fail "Raw_gap 0 should write nothing";
+  (* List >11 items: open/close markers and len_upto early-out *)
+  let big = List (List.init 13 (fun i -> Uint i)) in
+  let enc = Vof_bin.encode_str ctx big in
+  let dec, _ = require "list13" (Vof_bin.decode enc) in
+  let got = require "list13 read" (Read.list Read.uint dec) in
+  if List.length got <> 13 then Alcotest.fail "list13 length";
+  (* Gap > 4: extended gap encoding (byte 254 + varint) *)
+  let gs =
+    Context.schema ctx
+      ~fields:
+        [
+          "a", [ Key ];
+          "b", [];
+          "c", [];
+          "d", [];
+          "e", [];
+          "f", [];
+          "g", [];
+          "h", [];
+          "i", [];
+          "j", [];
+        ]
+      "biggap"
+  in
+  List.iter
+    (fun s -> ignore (Context.lookup_id ctx "com.test.bincov.biggap" s))
+    [ "a"; "b"; "c"; "d"; "e"; "f"; "g"; "h"; "i"; "j" ];
+  let enc =
+    Vof_bin.encode_str ctx
+      (Record
+         ( gs,
+           StringMap.empty
+           |> StringMap.add "a" (Uint 1)
+           |> StringMap.add "j" (Uint 9)
+         )
+      )
+  in
+  let dec, _ = require "gap>4" (Vof_bin.decode enc) in
+  let sm = require "gap>4 read" (Read.record ctx gs Option.some dec) in
+  let j_val = require "gap>4 j find" (StringMap.find_opt "j" sm) in
+  let j = require "gap>4 j read" (Read.uint j_val) in
+  if j <> 9 then Alcotest.fail "gap>4 j";
+  (* Raw_bstr encoding *)
+  let enc = Vof_bin.encode_str ctx (Raw_bstr "test") in
+  let dec, _ = require "raw_bstr" (Vof_bin.decode enc) in
+  if require "raw_bstr read" (Read.string dec) <> "test"
+  then Alcotest.fail "raw_bstr";
+  (* Raw_gap encoding + decoding *)
+  let enc = Vof_bin.encode_str ctx (Raw_gap 3) in
+  let dec, _ = require "raw_gap" (Vof_bin.decode enc) in
+  ( match dec with
+  | Raw_gap 3 -> ()
+  | _ -> Alcotest.fail "raw_gap"
+  );
+  (* Empty Series → empty list *)
+  let enc = Vof_bin.encode_str ctx (Series []) in
+  let dec, _ = require "empty series" (Vof_bin.decode enc) in
+  ( match dec with
+  | Raw_list [] -> ()
+  | _ -> Alcotest.fail "empty series"
+  );
+  (* Enum and nullary Variant *)
+  let vs = Context.schema ctx ~fields:[ "A", []; "B", []; "C", [] ] "bvar" in
+  let enc = Vof_bin.encode_str ctx (Enum (vs, "B")) in
+  let dec, _ = require "enum" (Vof_bin.decode enc) in
+  let got = require "enum read" (Read.variant ctx vs (fun n _ -> Some n) dec) in
+  if got <> "B" then Alcotest.fail "enum B";
+  let enc = Vof_bin.encode_str ctx (Variant (vs, "C", [])) in
+  let dec, _ = require "nvar" (Vof_bin.decode enc) in
+  let got = require "nvar read" (Read.variant ctx vs (fun n _ -> Some n) dec) in
+  if got <> "C" then Alcotest.fail "nullary variant C";
+  (* Decoder: invalid arguments raise Invalid_argument *)
+  let check_raises label f =
+    match f () with
+    | _ -> Alcotest.failf "%s: should raise" label
+    | exception Invalid_argument _ -> ()
+  in
+  check_raises "neg pos" (fun () -> Vof_bin.decode ~pos:(-1) "x");
+  check_raises "zero len" (fun () -> Vof_bin.decode ~len:0 "x");
+  check_raises "pos+len>len" (fun () -> Vof_bin.decode ~pos:3 ~len:5 "short");
+  (* Decoder: truncated inputs → None *)
+  let check_none label s =
+    if Option.is_some (Vof_bin.decode s)
+    then Alcotest.failf "%s: expected None" label
+  in
+  check_none "trunc read_byte" "\x80";
+  check_none "trunc read_le16" "\xC0\x01";
+  check_none "trunc read_le32" "\xD8\x01\x02";
+  check_none "trunc read_le64" "\xDC\x01\x02\x03\x04";
+  check_none "uint64 overflow" "\xDC\x00\x00\x00\x00\x00\x00\x00\x40";
+  check_none "trunc float32" "\xDE\x00\x00";
+  check_none "trunc float64" "\xDF\x00\x00\x00\x00";
+  check_none "bad uint prefix" "\xF8\xDD";
+  check_none "trunc inline str" "\xE7";
+  check_none "peek at limit" "\xFD\x2A";
+  check_none "bare 0xFF" "\xFF";
+  (* Tag 252: explicit uint tag *)
+  let dec, _ = require "tag252" (Vof_bin.decode "\xFC\x05\x2A") in
+  ( match dec with
+  | Raw_tag (5, Raw_int 42) -> ()
+  | _ -> Alcotest.fail "tag252 shape"
+  );
+  (* Extended gap decoding (byte 254 + varint) *)
+  let dec, _ = require "gap254" (Vof_bin.decode "\xFE\x0A") in
+  match dec with
+  | Raw_gap 10 -> ()
+  | _ -> Alcotest.fail "gap254 shape"
 ;;
 
 let test_codec_cbor_coverage () =
@@ -2260,7 +2542,41 @@ let test_codec_cbor_coverage () =
   let dec, _ = require "indef bytes decode" (Vof_cbor.decode indef_bytes) in
   let got = require "indef bytes read" (Read.data dec) in
   if got <> Bytes.of_string "world"
-  then Alcotest.fail "indef bytes: expected \"world\""
+  then Alcotest.fail "indef bytes: expected \"world\"";
+  (* 7. Decoder: truncated/malformed inputs → None *)
+  let check_none label s =
+    if Option.is_some (Vof_cbor.decode s)
+    then Alcotest.failf "decode %s: expected None" label
+  in
+  check_none "truncated arg byte" "\x18";
+  check_none "truncated arg be16" "\x19\x00";
+  check_none "truncated arg be32" "\x1A\x00\x00";
+  check_none "truncated arg be64" "\x1B\x00\x00\x00\x00";
+  check_none "oversized uint64" "\x1B\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF";
+  check_none "uint64 > max_int" "\x1B\x40\x00\x00\x00\x00\x00\x00\x00";
+  check_none "truncated string" "\x68abc";
+  check_none "bad arg additional" "\x1C";
+  check_none "wrong major in indef text" "\x7F\x42hi\xFF";
+  check_none "truncated float32" "\xFA\x00\x00";
+  check_none "truncated float64" "\xFB\x00\x00\x00\x00";
+  check_none "unknown simple value" "\xE0";
+  check_none "indef array no break" "\x9F\x01";
+  (* 8. Encoder: empty Series *)
+  let enc = Vof_cbor.encode_str ctx (Series []) in
+  let dec, _ = require "empty series decode" (Vof_cbor.decode enc) in
+  let got = require "empty series read" (Read.list Read.int dec) in
+  if got <> [] then Alcotest.fail "empty series: expected empty list";
+  (* 9. Encoder: nullary Variant (bare int, same branch as Enum) *)
+  let var_schema =
+    Context.schema ctx ~fields:[ "A", []; "B", []; "C", [] ] "var"
+  in
+  let enc = Vof_cbor.encode_str ctx (Variant (var_schema, "B", [])) in
+  let dec, _ = require "nullary variant decode" (Vof_cbor.decode enc) in
+  let got =
+    require "nullary variant read"
+      (Read.variant ctx var_schema (fun name _args -> Some name) dec)
+  in
+  if got <> "B" then Alcotest.failf "nullary variant: expected B got %s" got
 ;;
 
 let test_codec_cbor_magic () =
@@ -2529,6 +2845,97 @@ let test_each_field_errors () =
   then Alcotest.fail "expected None on Null without ~null";
   if List.length !warn2 = 0
   then Alcotest.fail "expected warning on Null without default"
+;;
+
+let test_children_classify_edges () =
+  let open Vof in
+  let all = make_test_ctx () in
+  let ctx, _, _, line_schema, _, _, _, _ = all in
+  let existing =
+    [
+      {
+        l_i = 1;
+        l_product = "Widget";
+        l_qty = (10, 0), None;
+        l_unit_price = 599, 2;
+      };
+      {
+        l_i = 2;
+        l_product = "Gadget";
+        l_qty = (3, 0), None;
+        l_unit_price = 1299, 2;
+      };
+    ]
+  in
+  let line_of_vof base v =
+    match Read.record ctx line_schema Option.some v with
+    | None -> None
+    | Some sm ->
+      let init = Option.value ~default:empty_line base in
+      Read.each_field (line_schema, sm) init (fun k v acc ->
+        match k with
+        | "i" -> { acc with l_i = Read.field Read.uint v }
+        | "product" ->
+          { acc with l_product = Read.field Read.string ~null:acc.l_product v }
+        | "qty" ->
+          { acc with l_qty = Read.field Read.quantity ~null:acc.l_qty v }
+        | "unit_price" ->
+          {
+            acc with
+            l_unit_price = Read.field Read.decimal ~null:acc.l_unit_price v;
+          }
+        | _ -> acc
+    )
+  in
+  let line_key_of l = l.l_i in
+  let line_key_read sm =
+    match StringMap.find_opt "i" sm with
+    | None -> None
+    | Some v -> Read.uint v
+  in
+  (* Patch with: - i=99: key recognized but NOT in existing → addition (line
+     967) - i=2 with invalid unit_price: of_vof fails → silently skipped (line
+     966) *)
+  let patch =
+    List
+      [
+        (* Key present but not in existing: addition via line 967 *)
+        Record
+          ( line_schema,
+            StringMap.empty
+            |> StringMap.add "i" (Uint 99)
+            |> StringMap.add "product" (String "NewKey")
+            |> StringMap.add "qty" (Quantity ((1, 0), None))
+            |> StringMap.add "unit_price" (Decimal (100, 2))
+          );
+        (* Key in existing but of_vof fails due to type mismatch: line 966 *)
+        Record
+          ( line_schema,
+            StringMap.empty
+            |> StringMap.add "i" (Uint 2)
+            |> StringMap.add "unit_price" (Bool true)
+          );
+      ]
+  in
+  let result =
+    Read.children ctx line_schema ~of_vof:line_of_vof ~key_of:line_key_of
+      ~key_read:line_key_read existing patch
+  in
+  match result with
+  | None -> Alcotest.fail "children returned None"
+  | Some results -> (
+    (* existing lines 1,2 preserved (line 2 edit failed → untouched), plus new
+       line i=99 added *)
+    let has_99 = List.exists (fun l -> l.l_i = 99) results in
+    if not has_99
+    then Alcotest.fail "line i=99 should be added (key not in existing)";
+    let line2 = List.find_opt (fun l -> l.l_i = 2) results in
+    match line2 with
+    | Some l ->
+      if l.l_product <> "Gadget"
+      then Alcotest.fail "line 2 should be unchanged (of_vof failed)"
+    | None -> Alcotest.fail "line 2 should still exist"
+  )
 ;;
 
 let test_children_patch () =
@@ -2898,7 +3305,6 @@ let test_services () =
   in
   let ctx, msg_s, order_s, line_s, addr_s, _, _, _ = make_test_ctx () in
   let sm = StringMap.empty in
-
   (* ---- make_query: defaults ---- *)
   let q = make_query [] in
   Alcotest.(check bool) "default star" true q.select.star;
@@ -2918,12 +3324,10 @@ let test_services () =
   Alcotest.(check int) "default page" 1 q.page;
   if q.filters <> [] then Alcotest.fail "default: no filters";
   if not (StringSet.is_empty q.prune) then Alcotest.fail "default: no prune";
-
   (* ---- make_query: max~ and page~ ---- *)
   let q = make_query [ "max~", "25"; "page~", "3" ] in
   Alcotest.(check int) "max" 25 q.max;
   Alcotest.(check int) "page" 3 q.page;
-
   (* ---- make_query: select~ with star + excludes ---- *)
   let q = make_query [ "select~", "*,!payload,!coords" ] in
   Alcotest.(check bool) "star+excl" true q.select.star;
@@ -2931,7 +3335,6 @@ let test_services () =
   then Alcotest.fail "payload not excluded";
   if not (StringSet.mem "coords" q.select.excludes)
   then Alcotest.fail "coords not excluded";
-
   (* ---- make_query: select~ with includes, expand, attach ---- *)
   let q =
     make_query
@@ -2961,7 +3364,6 @@ let test_services () =
   if not (StringSet.mem "street" asel.includes)
   then Alcotest.fail "addr: street";
   if not (StringSet.mem "city" asel.includes) then Alcotest.fail "addr: city";
-
   (* ---- make_query: all filter operators ---- *)
   let q =
     make_query
@@ -2982,87 +3384,83 @@ let test_services () =
   if not (StringSet.mem "lines" q.prune) then Alcotest.fail "lines not pruned";
   let ff name = List.find_opt (fun f -> f.field_path = [ name ]) q.filters in
   ( match ff "name" with
-  | Some f ->
+  | Some f -> (
     if f.negate then Alcotest.fail "name: should not be negated";
-    ( match f.op with
+    match f.op with
     | Has "Test" -> ()
     | _ -> Alcotest.fail "name: expected Has"
-    )
+  )
   | None -> Alcotest.fail "name: missing"
   );
   ( match ff "id" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Eq "42" -> ()
     | _ -> Alcotest.fail "id: expected Eq"
-    )
+  )
   | None -> Alcotest.fail "id: missing"
   );
   ( match ff "total" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Gt "100" -> ()
     | _ -> Alcotest.fail "total: expected Gt"
-    )
+  )
   | None -> Alcotest.fail "total: missing"
   );
   ( match ff "status" with
-  | Some f ->
+  | Some f -> (
     if not f.negate then Alcotest.fail "status: should be negated";
-    ( match f.op with
+    match f.op with
     | In [ "Draft"; "Cancelled" ] -> ()
     | _ -> Alcotest.fail "status: expected In"
-    )
+  )
   | None -> Alcotest.fail "status: missing"
   );
   ( match ff "ordered_on" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Between ("20250601", "20250630") -> ()
     | _ -> Alcotest.fail "ordered_on: expected Between"
-    )
+  )
   | None -> Alcotest.fail "ordered_on: missing"
   );
   ( match ff "price" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Lt "50" -> ()
     | _ -> Alcotest.fail "price: expected Lt"
-    )
+  )
   | None -> Alcotest.fail "price: missing"
   );
   ( match ff "qty" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Lte "10" -> ()
     | _ -> Alcotest.fail "qty: expected Lte"
-    )
+  )
   | None -> Alcotest.fail "qty: missing"
   );
   ( match ff "weight" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Gte "1" -> ()
     | _ -> Alcotest.fail "weight: expected Gte"
-    )
+  )
   | None -> Alcotest.fail "weight: missing"
   );
-
   (* ---- make_query: nested field path ---- *)
   let q = make_query [ "lines.product", "has:Widget" ] in
   ( match
-      List.find_opt
-        (fun f -> f.field_path = [ "lines"; "product" ])
-        q.filters
+      List.find_opt (fun f -> f.field_path = [ "lines"; "product" ]) q.filters
     with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Has "Widget" -> ()
     | _ -> Alcotest.fail "nested: expected Has"
-    )
+  )
   | None -> Alcotest.fail "nested filter: missing"
   );
-
   (* ---- make_query: operator synonyms ---- *)
   let q =
     make_query
@@ -3077,54 +3475,53 @@ let test_services () =
   in
   let ff name = List.find_opt (fun f -> f.field_path = [ name ]) q.filters in
   ( match ff "a" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Lt "10" -> ()
     | _ -> Alcotest.fail "under→Lt"
-    )
+  )
   | None -> Alcotest.fail "a: missing"
   );
   ( match ff "b" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Lte "5" -> ()
     | _ -> Alcotest.fail "upto→Lte"
-    )
+  )
   | None -> Alcotest.fail "b: missing"
   );
   ( match ff "c" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Gt "3" -> ()
     | _ -> Alcotest.fail "over→Gt"
-    )
+  )
   | None -> Alcotest.fail "c: missing"
   );
   ( match ff "d" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Gte "1" -> ()
     | _ -> Alcotest.fail "atleast→Gte"
-    )
+  )
   | None -> Alcotest.fail "d: missing"
   );
   ( match ff "e" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Lt "X" -> ()
     | _ -> Alcotest.fail "before→Lt"
-    )
+  )
   | None -> Alcotest.fail "e: missing"
   );
   ( match ff "f" with
-  | Some f ->
-    ( match f.op with
+  | Some f -> (
+    match f.op with
     | Gt "Y" -> ()
     | _ -> Alcotest.fail "after→Gt"
-    )
+  )
   | None -> Alcotest.fail "f: missing"
   );
-
   (* ---- make_query: warnings on bad input ---- *)
   let warn = ref [] in
   let q =
@@ -3132,7 +3529,6 @@ let test_services () =
   in
   Alcotest.(check bool) "bad select degrades to star" true q.select.star;
   if List.length !warn = 0 then Alcotest.fail "expected warnings on bad input";
-
   (* ---- msg_add: direct accumulation with dedup ---- *)
   let full_addr1 =
     ( addr_s,
@@ -3157,7 +3553,7 @@ let test_services () =
   let msg = msg_add ctx msg (addr_s, StringMap.singleton "id" (Uint 1)) in
   let _, mf = msg_record msg_s msg in
   ( match StringMap.find_opt "addresses" mf with
-  | Some (List al) ->
+  | Some (List al) -> (
     Alcotest.(check int) "msg_add: 2 addrs" 2 (List.length al);
     (* Find addr 1 and verify full record wins over ref *)
     let a1 =
@@ -3168,16 +3564,15 @@ let test_services () =
           )
         al
     in
-    ( match a1 with
+    match a1 with
     | Some (Record (_, a1f)) ->
       if not (StringMap.mem "street" a1f)
       then Alcotest.fail "msg_add: full record should win over ref"
     | _ -> Alcotest.fail "msg_add: addr 1 not found"
-    )
+  )
   | Some _ -> Alcotest.fail "msg_add: addresses should be List"
   | None -> Alcotest.fail "msg_add: addresses missing"
   );
-
   (* ---- build_msg with expand + attach ---- *)
   Context.add_fetchers ctx
     [
@@ -3186,7 +3581,8 @@ let test_services () =
           match StringMap.find_opt "id" fields with
           | Some (Uint 1) -> Ok full_addr1
           | Some (Uint 2) -> Ok full_addr2
-          | _ -> Error "address not found" );
+          | _ -> Error "address not found"
+      );
     ];
   let line1 =
     Record
@@ -3195,7 +3591,8 @@ let test_services () =
         |> StringMap.add "i" (Uint 1)
         |> StringMap.add "product" (String "Widget")
         |> StringMap.add "qty" (Quantity ((10, 0), None))
-        |> StringMap.add "unit_price" (Decimal (599, 2)) )
+        |> StringMap.add "unit_price" (Decimal (599, 2))
+      )
   in
   let line2 =
     Record
@@ -3204,7 +3601,8 @@ let test_services () =
         |> StringMap.add "i" (Uint 2)
         |> StringMap.add "product" (String "Gadget")
         |> StringMap.add "qty" (Quantity ((3, 0), None))
-        |> StringMap.add "unit_price" (Decimal (1299, 2)) )
+        |> StringMap.add "unit_price" (Decimal (1299, 2))
+      )
   in
   let order =
     Record
@@ -3222,7 +3620,8 @@ let test_services () =
                   Record (addr_s, StringMap.singleton "id" (Uint 1));
                   Record (addr_s, StringMap.singleton "id" (Uint 2));
                 ]
-             ) )
+             )
+      )
   in
   let query =
     make_query
@@ -3230,12 +3629,10 @@ let test_services () =
   in
   let msg = make_msg () in
   let msg, filtered = build_msg ctx query ~msg order in
-
   (* Verify filtered output: explicitly selected fields present *)
   ( match filtered with
-  | Record (_, flds) ->
-    if not (StringMap.mem "id" flds)
-    then Alcotest.fail "filtered: missing id";
+  | Record (_, flds) -> (
+    if not (StringMap.mem "id" flds) then Alcotest.fail "filtered: missing id";
     if not (StringMap.mem "name" flds)
     then Alcotest.fail "filtered: missing name";
     if not (StringMap.mem "total" flds)
@@ -3244,7 +3641,7 @@ let test_services () =
     if StringMap.mem "active" flds
     then Alcotest.fail "filtered: active should be absent";
     (* Expanded lines: only i and product *)
-    ( match StringMap.find_opt "lines" flds with
+    match StringMap.find_opt "lines" flds with
     | Some (List ll) ->
       Alcotest.(check int) "filtered: 2 lines" 2 (List.length ll);
       List.iter
@@ -3263,10 +3660,9 @@ let test_services () =
         )
         ll
     | _ -> Alcotest.fail "filtered: lines should be a List"
-    )
+  )
   | _ -> Alcotest.fail "filtered: expected Record"
   );
-
   (* ---- msg_record: verify attached addresses with sub-selection ---- *)
   let _, mf = msg_record msg_s msg in
   ( match StringMap.find_opt "addresses" mf with
@@ -3290,7 +3686,6 @@ let test_services () =
   | Some _ -> Alcotest.fail "msg: addresses should be List"
   | None -> Alcotest.fail "msg: addresses missing"
   );
-
   (* ---- build_msg with list of records ---- *)
   let order2 =
     Record
@@ -3302,14 +3697,16 @@ let test_services () =
         |> StringMap.add "total" (Amount ((5000, 2), None))
         |> StringMap.add "lines" (List [])
         |> StringMap.add "addresses"
-             (List [ Record (addr_s, StringMap.singleton "id" (Uint 1)) ]) )
+             (List [ Record (addr_s, StringMap.singleton "id" (Uint 1)) ])
+      )
   in
   let query_star = make_query [ "select~", "*,$addresses" ] in
   let msg2 = make_msg () in
-  let msg2, filtered2 = build_msg ctx query_star ~msg:msg2 (List [ order; order2 ]) in
+  let msg2, filtered2 =
+    build_msg ctx query_star ~msg:msg2 (List [ order; order2 ])
+  in
   ( match filtered2 with
-  | List fl ->
-    Alcotest.(check int) "list: 2 orders" 2 (List.length fl)
+  | List fl -> Alcotest.(check int) "list: 2 orders" 2 (List.length fl)
   | _ -> Alcotest.fail "list: expected List"
   );
   (* Addresses de-duplicated in msg: addr 1 referenced by both orders *)
@@ -3319,7 +3716,6 @@ let test_services () =
     Alcotest.(check int) "list msg: 2 unique addrs" 2 (List.length al)
   | _ -> Alcotest.fail "list msg: addresses"
   );
-
   (* ---- build_msg: edge case coverage ---- *)
   let mk_order fields =
     Record
@@ -3330,7 +3726,8 @@ let test_services () =
           |> StringMap.add "id" (Uint 50)
           |> StringMap.add "modified_at" (Timestamp 1750800000)
           )
-          fields )
+          fields
+      )
   in
   let line_rec i p =
     ( line_s,
@@ -3343,14 +3740,12 @@ let test_services () =
       |> StringMap.add "street" (String st)
       |> StringMap.add "city" (String "City") )
   in
-
   (* Top-level scalar passthrough *)
   let _, rv = build_msg ctx (make_query []) (String "hi") in
   ( match rv with
   | String "hi" -> ()
   | _ -> Alcotest.fail "bm: scalar passthrough"
   );
-
   (* Top-level Series *)
   let _, rv =
     build_msg ctx
@@ -3364,14 +3759,12 @@ let test_services () =
     if not (StringMap.mem "i" f1) then Alcotest.fail "bm: series i missing"
   | _ -> Alcotest.fail "bm: expected Series"
   );
-
   (* List with non-Record items *)
   let _, rv = build_msg ctx (make_query []) (List [ String "a"; Int 1 ]) in
   ( match rv with
   | List [ String "a"; Int 1 ] -> ()
   | _ -> Alcotest.fail "bm: list non-record"
   );
-
   (* expand: ref → fetched and sub-selected *)
   let _, rv =
     build_msg ctx
@@ -3395,7 +3788,6 @@ let test_services () =
   )
   | _ -> Alcotest.fail "bm: expand ref"
   );
-
   (* expand: ref, fetcher Error → warning *)
   let w = ref [] in
   let _ =
@@ -3409,15 +3801,12 @@ let test_services () =
       )
   in
   if !w = [] then Alcotest.fail "bm: expand ref error warn";
-
   (* expand: ref, no fetcher → unchanged *)
   let _, rv =
     build_msg ctx
       (make_query [ "select~", "id,lines(i)" ])
       (mk_order
-         [
-           "lines", List [ Record (line_s, StringMap.singleton "i" (Uint 1)) ];
-         ]
+         [ "lines", List [ Record (line_s, StringMap.singleton "i" (Uint 1)) ] ]
       )
   in
   ( match rv with
@@ -3429,7 +3818,6 @@ let test_services () =
   )
   | _ -> Alcotest.fail "bm: expand nofetch"
   );
-
   (* expand: Series value *)
   let _, rv =
     build_msg ctx
@@ -3446,7 +3834,6 @@ let test_services () =
   )
   | _ -> Alcotest.fail "bm: expand series"
   );
-
   (* expand: scalar value → passthrough *)
   let _, rv =
     build_msg ctx
@@ -3461,15 +3848,12 @@ let test_services () =
   )
   | _ -> Alcotest.fail "bm: expand scalar rec"
   );
-
   (* attach: ref, no fetcher → unchanged *)
   let _, rv =
     build_msg ctx
       (make_query [ "select~", "id,$lines(i)" ])
       (mk_order
-         [
-           "lines", List [ Record (line_s, StringMap.singleton "i" (Uint 1)) ];
-         ]
+         [ "lines", List [ Record (line_s, StringMap.singleton "i" (Uint 1)) ] ]
       )
   in
   ( match rv with
@@ -3481,7 +3865,6 @@ let test_services () =
   )
   | _ -> Alcotest.fail "bm: attach nofetch"
   );
-
   (* attach: ref, fetcher Error → warning *)
   let w = ref [] in
   let _ =
@@ -3495,7 +3878,6 @@ let test_services () =
       )
   in
   if !w = [] then Alcotest.fail "bm: attach ref error warn";
-
   (* attach: non-ref Record → added to msg, output becomes ref *)
   let m = make_msg () in
   let m, rv =
@@ -3521,7 +3903,6 @@ let test_services () =
     if StringMap.mem "city" af then Alcotest.fail "bm: attach nonref msg city"
   | _ -> Alcotest.fail "bm: attach nonref msg"
   );
-
   (* attach: Series value *)
   let m = make_msg () in
   let _, rv =
@@ -3540,21 +3921,88 @@ let test_services () =
   )
   | _ -> Alcotest.fail "bm: attach series"
   );
-
   (* attach: scalar value → passthrough *)
   let _, rv =
     build_msg ctx
       (make_query [ "select~", "id,$name" ])
       (mk_order [ "name", String "Pass" ])
   in
-  ( match rv with
+  match rv with
   | Record (_, flds) -> (
     match StringMap.find_opt "name" flds with
     | Some (String "Pass") -> ()
     | _ -> Alcotest.fail "bm: attach scalar"
   )
   | _ -> Alcotest.fail "bm: attach scalar rec"
+;;
+
+let test_make_query_parse_edges () =
+  let open Vof in
+  let warn = ref [] in
+  (* --- parse_selection_str edges --- *)
+  (* Line 1354: empty select~ value → Some default_selection *)
+  let q = make_query [ "select~", "" ] in
+  Alcotest.(check bool) "empty select~ → star" true q.select.star;
+  (* Line 1353: unbalanced ')' → exception Vof_return → None → default+warn *)
+  warn := [];
+  let q = make_query ~warn [ "select~", ")" ] in
+  Alcotest.(check bool) "unbal ) → star" true q.select.star;
+  if List.length !warn = 0 then Alcotest.fail ") should warn";
+  (* Line 1316: bare '$' token → blen=0 → Vof_return (line 1356) *)
+  warn := [];
+  let q = make_query ~warn [ "select~", "$" ] in
+  Alcotest.(check bool) "bare $ → star" true q.select.star;
+  if List.length !warn = 0 then Alcotest.fail "$ should warn";
+  (* Line 1318: '(' at position 0 of base → Vof_return *)
+  warn := [];
+  let q = make_query ~warn [ "select~", "(foo)" ] in
+  Alcotest.(check bool) "leading ( → star" true q.select.star;
+  if List.length !warn = 0 then Alcotest.fail "(foo) should warn";
+  (* Line 1323: inner parse_selection_str fails → Vof_return *)
+  warn := [];
+  let q = make_query ~warn [ "select~", "foo($)" ] in
+  Alcotest.(check bool) "foo($) inner fail → star" true q.select.star;
+  if List.length !warn = 0 then Alcotest.fail "foo($) should warn";
+  (* Line 1329: has '(' not at 0, but last char is not ')' → Vof_return *)
+  warn := [];
+  let q = make_query ~warn [ "select~", "a(b)c" ] in
+  Alcotest.(check bool) "a(b)c → star" true q.select.star;
+  if List.length !warn = 0 then Alcotest.fail "a(b)c should warn";
+  (* Line 1333: base = "!" → blen < 2 → Vof_return *)
+  warn := [];
+  let q = make_query ~warn [ "select~", "!" ] in
+  Alcotest.(check bool) "bare ! → star" true q.select.star;
+  if List.length !warn = 0 then Alcotest.fail "! should warn";
+  (* Line 1339: consecutive commas → empty token → skipped *)
+  let q = make_query [ "select~", "a,,b" ] in
+  Alcotest.(check bool) "a,,b not star" false q.select.star;
+  if not (StringSet.mem "a" q.select.includes)
+  then Alcotest.fail "a,,b: a missing";
+  if not (StringSet.mem "b" q.select.includes)
+  then Alcotest.fail "a,,b: b missing";
+  (* --- parse_filter edges --- *)
+  (* Line 1380: unrecognized operator prefix → falls through to Eq with full
+     value, treating ':' as transparent *)
+  let q = make_query [ "name", "blah:stuff" ] in
+  ( match List.find_opt (fun f -> f.field_path = [ "name" ]) q.filters with
+  | Some f -> (
+    match f.op with
+    | Eq "blah:stuff" -> ()
+    | _ -> Alcotest.fail "unknown op should be Eq with full value"
   )
+  | None -> Alcotest.fail "name filter missing"
+  );
+  (* Line 1383: key "!" → parse_filter returns None → warning *)
+  warn := [];
+  let _q = make_query ~warn [ "!", "x" ] in
+  if List.length !warn = 0 then Alcotest.fail "! key should warn";
+  (* --- prune~ edge: empty tokens from split filtered out --- *)
+  (* Line 1414: ",foo," splits to [""; "foo"; ""], empties filtered *)
+  let q = make_query [ "prune~", ",foo," ] in
+  if not (StringSet.mem "foo" q.prune)
+  then Alcotest.fail "prune ,foo,: foo missing";
+  if StringSet.cardinal q.prune <> 1
+  then Alcotest.fail "prune ,foo,: should have exactly 1 entry"
 ;;
 
 let () =
@@ -3585,6 +4033,10 @@ let () =
             test_context_schema_redefine_no_update;
           Alcotest.test_case "schema redefine update" `Quick
             test_context_schema_redefine_update;
+          Alcotest.test_case "schema evolution (key/list_of/drop)" `Quick
+            test_context_schema_evolution;
+          Alcotest.test_case "ns qualifiers save/load" `Quick
+            test_context_ns_qualifiers_save_load;
         ] );
       ( "Float16",
         [
@@ -3667,6 +4119,9 @@ let () =
       ( "JSON codec",
         [
           Alcotest.test_case "large int encoding" `Quick test_json_large_int;
+          Alcotest.test_case "series missing field" `Quick
+            test_json_series_missing_field;
+          Alcotest.test_case "empty series" `Quick test_json_empty_series;
           Alcotest.test_case "roundtrip" `Quick test_codec_json;
         ] );
       ( "CBOR codec",
@@ -3675,7 +4130,11 @@ let () =
           Alcotest.test_case "roundtrip with magic" `Quick test_codec_cbor_magic;
           Alcotest.test_case "coverage edges" `Quick test_codec_cbor_coverage;
         ] );
-      "Binary codec", [ Alcotest.test_case "roundtrip" `Quick test_codec_bin ];
+      ( "Binary codec",
+        [
+          Alcotest.test_case "roundtrip" `Quick test_codec_bin;
+          Alcotest.test_case "coverage edges" `Quick test_codec_bin_coverage;
+        ] );
       ( "Structural",
         [
           Alcotest.test_case "equal, is_ref, make_ref" `Quick
@@ -3688,6 +4147,8 @@ let () =
             test_each_field_happy;
           Alcotest.test_case "each_field + field errors" `Quick
             test_each_field_errors;
+          Alcotest.test_case "children classify edges" `Quick
+            test_children_classify_edges;
           Alcotest.test_case "children patch semantics" `Quick
             test_children_patch;
         ] );
@@ -3700,6 +4161,10 @@ let () =
             test_diff_children_and_collections;
         ] );
       ( "Services",
-        [ Alcotest.test_case "query, msg, build_msg" `Quick test_services ] );
+        [
+          Alcotest.test_case "query, msg, build_msg" `Quick test_services;
+          Alcotest.test_case "query parse edges" `Quick
+            test_make_query_parse_edges;
+        ] );
     ]
 ;;

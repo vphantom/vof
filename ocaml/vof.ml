@@ -251,7 +251,7 @@ module Context = struct
             | Some s -> idx.lists <- StringMap.add s name idx.lists
           );
           let update_other s o =
-            match StringMap.find_opt s f_new.other with
+            match StringMap.find_opt s f_old.other with
             | Some o' when o = o' -> ()
             | _ ->
               changed := true;
