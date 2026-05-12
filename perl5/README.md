@@ -20,7 +20,3 @@ As of this version, the final encoding and decoding is left to the caller and th
 
 * Server API helpers are not implemented
 * CBOR and Binary I/O are not implemented.
-
-## LLM Use Disclosure
-
-Porting from the OCaml reference implementation to Perl was done in part with tightly supervised assistance from Anthropic Claude Opus 4.6.  No code was generated from specs alone.
