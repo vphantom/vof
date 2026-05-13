@@ -8,25 +8,25 @@ Decoders encountering impossible input (including invalid UTF-8 in `string` data
 
 Small integers are compressed at the slight expense of larger ones similarly to the Prefix Varint format (itself a variation on LEB128 and VLQ but eliminating loops, most shifts and representing 64 bits in 9 bytes instead of 10).  Extra bytes for the multi-byte integers are in Little Endian order, so any bits in the initial byte are the least significant.  Illustrated here from the decoder point of view, we see that very little computing is involved:
 
-| Byte (`c`) | Type               | Condition | Description / Operation                         |
-| ---------- | ------------------ | --------- | ----------------------------------------------- |
-| `0_______` | Int 7-bit          | `< 128`   | `c`                                             |
-| `10______` | Int 14-bit         | `< 192`   | `(next_byte() << 6) + c - 128`                  |
-| `1100____` | Int 20-bit         | `< 208`   | `(next_bytes_le(2) << 4) + c - 192`             |
-| `11010___` | Int 27-bit         | `< 216`   | `(next_bytes_le(3) << 3) + c - 208`             |
-|            | Int 32,40,48,56,64 | `< 221`   | Next 4,5,6,7,8 bytes are int Little Endian      |
-|            | Float 16,32,64     | `< 224`   | Next 2,4,8 bytes are IEEE 754 Little Endian     |
-|            | String (0..7)      | `< 232`   | Exactly `c - 224` UTF-8 bytes                   |
-|            | List (0..11)       | `< 244`   | Exactly `c - 232` values (no Close)             |
-|            | Gap (1..4)         | `< 248`   | Represents `c - 243` undefined values           |
-|            | String             | `== 248`  | Next is size in bytes, then as many UTF-8 bytes |
-|            | Data               | `== 249`  | Next is size in bytes, then as many raw bytes   |
-|            | Null               | `== 250`  |                                                 |
-|            | Alt                | `== 251`  | Next value is in its alternate form, `Tag(-1)`  |
-|            | Tag                | `== 252`  | Next Int qualifies next value                   |
-|            | List Open          | `== 253`  | Values until `List Close`                       |
-|            | Gap                | `== 254`  | Next Int is number of undefined values          |
-|            | List Close         |           | Close nearest `List Open`                       |
+| Value    | Type               | Description / Operation                         |
+| -------- | ------------------ | ----------------------------------------------- |
+| 0..127   | Int 7-bit          | `c`                                             |
+| 128..191 | Int 14-bit         | `(next_byte() << 6) + c - 128`                  |
+| 192..207 | Int 20-bit         | `(next_bytes_le(2) << 4) + c - 192`             |
+| 208..215 | Int 27-bit         | `(next_bytes_le(3) << 3) + c - 208`             |
+| 216..220 | Int 32,40,48,56,64 | Next 4,5,6,7,8 bytes are int Little Endian      |
+| 221..223 | Float 16,32,64     | Next 2,4,8 bytes are IEEE 754 Little Endian     |
+| 224..231 | String (0..7)      | Exactly `c - 224` UTF-8 bytes                   |
+| 232..243 | List (0..11)       | Exactly `c - 232` values (no Close)             |
+| 244..247 | Gap (1..4)         | Represents `c - 243` undefined values           |
+| 248      | String             | Next is size in bytes, then as many UTF-8 bytes |
+| 249      | Data               | Next is size in bytes, then as many raw bytes   |
+| 250      | Null               |                                                 |
+| 251      | Alt                | Next value is in its alternate form, `Tag(-1)`  |
+| 252      | Tag                | Next Int qualifies next value                   |
+| 253      | List Open          | Values until `List Close`                       |
+| 254      | Gap                | Next Int is number of undefined values          |
+| 255      | List Close         | Close nearest `List Open`                       |
 
 ### Canonical Encoding
 
