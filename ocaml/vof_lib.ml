@@ -5,6 +5,106 @@ let die_arg fn fmt =
   Printf.ksprintf invalid_arg ("Vof_lib." ^^ fn ^^ ": " ^^ fmt)
 ;;
 
+let ns_str s =
+  let nc c =
+    match c with
+    | 'A' .. 'Z' -> Char.chr (Char.code c + 32)
+    | '_' | '-' -> '_'
+    | '.' | '$' | '0' .. '9' | 'a' .. 'z' -> c
+    | _ -> die_arg "symbol" "invalid character %c" c
+  in
+  String.map nc s
+;;
+
+let sym_str s =
+  let nc c =
+    match c with
+    | 'A' .. 'Z' -> Char.chr (Char.code c + 32)
+    | '_' | '-' -> '_'
+    | '0' .. '9' | 'a' .. 'z' -> c
+    | _ -> die_arg "symbol" "invalid character %c" c
+  in
+  String.map nc s
+;;
+
+module Enum = struct
+  module StringMap = Map.Make (String)
+
+  type t = {
+    idx: int StringMap.t;
+    canon: string array;
+    aliases: string list array;
+  }
+
+  type id = int
+
+  let empty = { idx = StringMap.empty; canon = [||]; aliases = [||] }
+  let length e = Array.length e.canon
+
+  let add e = function
+    | [] -> e
+    | canon :: aliases as all ->
+      let check a =
+        if StringMap.mem (sym_str a) e.idx
+        then die_arg "Enum.add" "duplicate %s" a
+      in
+      List.iter check all;
+      let id = Array.length e.canon in
+      {
+        canon = Array.append e.canon [| canon |];
+        idx =
+          List.fold_left (fun m a -> StringMap.add (sym_str a) id m) e.idx all;
+        aliases = Array.append e.aliases [| aliases |];
+      }
+  ;;
+
+  let add_list e sll = List.fold_left add e sll
+  let make = add_list empty
+  let mem e s = StringMap.mem (sym_str s) e.idx
+  let iter f e = Array.iter f e.canon
+  let lookup e s = StringMap.find_opt (sym_str s) e.idx
+
+  let set_aliases e s al =
+    match lookup e s with
+    | None -> die_arg "Enum.update_aliases" "unknown symbol %s" s
+    | Some i ->
+      let old = e.aliases.(i) in
+      let idx =
+        List.fold_left (fun m a -> StringMap.remove (sym_str a) m) e.idx old
+      in
+      let idx =
+        List.fold_left (fun m a -> StringMap.add (sym_str a) i m) idx al
+      in
+      let aliases = Array.copy e.aliases in
+      aliases.(i) <- al;
+      { e with idx; aliases }
+  ;;
+
+  let canonical e i =
+    if i < 0 || i >= Array.length e.canon
+    then die_arg "Enum.canonical" "index %d out of range" i;
+    Array.unsafe_get e.canon i
+  ;;
+
+  let canonical_opt e i =
+    if i < 0 || i >= Array.length e.canon
+    then None
+    else Some (Array.unsafe_get e.canon i)
+  ;;
+
+  let aliases e i =
+    if i < 0 || i >= Array.length e.aliases
+    then die_arg "Enum.aliases" "index %d out of range" i;
+    e.aliases.(i)
+  ;;
+
+  let aliases_str e s =
+    match lookup e s with
+    | None -> []
+    | Some i -> aliases e i
+  ;;
+end
+
 module Decimal = struct
   let[@inline] optimize (value, dec) =
     let rec loop v d =

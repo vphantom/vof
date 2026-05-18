@@ -256,7 +256,7 @@ let rec encode_val ctx buf = function
     write_int buf days;
     write_int buf secs
   | Code s
-  | Language s
+  | Locale s
   | Country s
   | Subdivision s
   | Currency s

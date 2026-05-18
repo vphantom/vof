@@ -153,7 +153,7 @@ let rec encode_val ctx buf = function
   | String s
   | Raw_bstr s
   | Code s
-  | Language s
+  | Locale s
   | Country s
   | Subdivision s
   | Currency s

@@ -65,7 +65,7 @@ let rec of_vof ctx = function
   | Timespan { hmonths; days; secs } ->
     `List [ `Int hmonths; `Int days; `Int secs ]
   | Code s
-  | Language s
+  | Locale s
   | Country s
   | Subdivision s
   | Currency s

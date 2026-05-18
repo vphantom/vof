@@ -3,6 +3,75 @@ module Ratio = Vof_lib.Ratio
 module Date = Vof_lib.Date
 module Datetime = Vof_lib.Datetime
 module Timestamp = Vof_lib.Timestamp
+module Enum = Vof_lib.Enum
+
+(* === Enum === *)
+
+let test_enum_make_and_lookup () =
+  let e = Enum.make [ [ "Alpha"; "a" ]; [ "Beta" ]; [ "en_US"; "en" ] ] in
+  Alcotest.(check (option int)) "Alpha" (Some 0) (Enum.lookup e "Alpha");
+  Alcotest.(check (option int)) "a→0" (Some 0) (Enum.lookup e "a");
+  Alcotest.(check (option int)) "alpha" (Some 0) (Enum.lookup e "alpha");
+  Alcotest.(check (option int)) "BETA" (Some 1) (Enum.lookup e "BETA");
+  Alcotest.(check (option int)) "en→2" (Some 2) (Enum.lookup e "en");
+  Alcotest.(check (option int)) "en-US" (Some 2) (Enum.lookup e "en-US");
+  Alcotest.(check (option int)) "EN_US" (Some 2) (Enum.lookup e "EN_US");
+  Alcotest.(check (option int)) "unknown" None (Enum.lookup e "nope");
+  Alcotest.(check int) "length" 3 (Enum.length e);
+  let e0 = Enum.make [] in
+  Alcotest.(check int) "empty" 0 (Enum.length e0)
+;;
+
+let test_enum_canonical () =
+  let e = Enum.make [ [ "en_US"; "en" ]; [ "fr_CA"; "fr" ] ] in
+  Alcotest.(check string) "0" "en_US" (Enum.canonical e 0);
+  Alcotest.(check string) "1" "fr_CA" (Enum.canonical e 1);
+  Alcotest.(check (option string))
+    "opt 0" (Some "en_US") (Enum.canonical_opt e 0);
+  Alcotest.(check (option string)) "opt 99" None (Enum.canonical_opt e 99);
+  match Enum.canonical e 99 with
+  | _ -> Alcotest.fail "should raise"
+  | exception _ -> ()
+;;
+
+let test_enum_add_mem_iter_aliases () =
+  let e = Enum.make [] in
+  (* add empty list: NOP *)
+  ignore (Enum.add e []);
+  Alcotest.(check int) "add [] NOP" 0 (Enum.length e);
+  (* Sequential adds with aliases *)
+  let e = Enum.add e [ "A"; "a1"; "a2" ] in
+  let e = Enum.add e [ "B" ] in
+  (* Alcotest.(check int) "id0" 0 id0; *)
+  (* Alcotest.(check int) "id1" 1 id1; *)
+  Alcotest.(check int) "length" 2 (Enum.length e);
+  (* mem with normalization *)
+  if not (Enum.mem e "A") then Alcotest.fail "mem A";
+  if not (Enum.mem e "a1") then Alcotest.fail "mem a1";
+  if not (Enum.mem e "a2") then Alcotest.fail "mem a2";
+  if not (Enum.mem e "A1") then Alcotest.fail "mem A1 (case)";
+  if Enum.mem e "nope" then Alcotest.fail "mem nope";
+  (* iter: canonical names in order *)
+  let acc = ref [] in
+  Enum.iter (fun s -> acc := s :: !acc) e;
+  Alcotest.(check (list string)) "iter" [ "A"; "B" ] (List.rev !acc);
+  (* aliases *)
+  Alcotest.(check (list string)) "A aliases" [ "a1"; "a2" ] (Enum.aliases e 0);
+  Alcotest.(check (list string)) "B aliases" [] (Enum.aliases e 1);
+  (* duplicate alias across symbols fails *)
+  match Enum.add e [ "C"; "a1" ] with
+  | _ -> Alcotest.fail "dup alias should fail"
+  | exception _ -> ()
+;;
+
+let test_enum_invalid_char () =
+  let check s =
+    match Enum.make [ [ s ] ] with
+    | _ -> Alcotest.failf "%S should raise" s
+    | exception Invalid_argument _ -> ()
+  in
+  check "has space"; check "has.dot"; check "has@at"
+;;
 
 (* === Core === *)
 
@@ -516,6 +585,67 @@ let test_context_ns_qualifiers_save_load () =
   then Alcotest.failf "qualifier 'deprecated' lost in save:\n%s" saved;
   if not (has " internal")
   then Alcotest.failf "qualifier 'internal' lost in save:\n%s" saved
+;;
+
+let test_context_aka_save_load () =
+  let path = tmp_symtable () in
+  let ctx = Vof.Context.make ~update:true "com.test" in
+  Vof.Context.load ctx path;
+  let _ =
+    Vof.Context.schema ctx
+      ~fields:
+        [
+          "en_US", [ Aka [ "en"; "en_CA" ] ];
+          "fr_CA", [ Aka [ "fr" ] ];
+          "bare", [];
+        ]
+      "akatest"
+  in
+  List.iter
+    (fun s -> ignore (Vof.Context.lookup_id ctx "com.test.akatest" s))
+    [ "en_US"; "fr_CA"; "bare" ];
+  Vof.Context.save ctx;
+  (* Reload and verify alias lookups *)
+  let ctx2 = Vof.Context.make ~update:false "com.test" in
+  Vof.Context.load ctx2 path;
+  Alcotest.(check int)
+    "en_US" 0
+    (Vof.Context.lookup_id ctx2 "com.test.akatest" "en_US");
+  Alcotest.(check int)
+    "en→0" 0
+    (Vof.Context.lookup_id ctx2 "com.test.akatest" "en");
+  Alcotest.(check int)
+    "en_CA→0" 0
+    (Vof.Context.lookup_id ctx2 "com.test.akatest" "en_CA");
+  Alcotest.(check int)
+    "fr→1" 1
+    (Vof.Context.lookup_id ctx2 "com.test.akatest" "fr");
+  (* Verify aka written to file *)
+  let contents = In_channel.with_open_bin path In_channel.input_all in
+  let has sub =
+    let rec check i =
+      if i > String.length contents - String.length sub
+      then false
+      else if String.sub contents i (String.length sub) = sub
+      then true
+      else check (i + 1)
+    in
+    check 0
+  in
+  if not (has "aka:en,en_CA")
+  then Alcotest.failf "expected aka:en,en_CA in file:\n%s" contents;
+  if not (has "aka:fr")
+  then Alcotest.failf "expected aka:fr in file:\n%s" contents
+;;
+
+let test_context_path_normalization () =
+  let ctx = Vof.Context.make ~update:true "Com.Test" in
+  let s1 = Vof.Context.schema ctx ~fields:[ "id", [ Key ] ] "Order" in
+  let s2 = Vof.Context.schema ctx "order" in
+  Alcotest.(check string) "same path" s1.path s2.path;
+  let id0 = Vof.Context.lookup_id ctx "com.test.order" "id" in
+  let id0' = Vof.Context.lookup_id ctx "Com.Test.Order" "id" in
+  Alcotest.(check int) "same id" id0 id0'
 ;;
 
 let pow10 n =
@@ -1649,7 +1779,7 @@ let make_test_ctx () =
           "neg_tax", [];
           "qty", [];
           "sku", [];
-          "lang", [];
+          "locale", [];
           "country", [];
           "subdivision", [];
           "curr", [];
@@ -1805,7 +1935,7 @@ let make_test_t
         |> StringMap.add "neg_tax" (Tax ((-75, 2), "CA_QC_QST", None))
         |> StringMap.add "qty" (Quantity ((5, 0), Some "EA"))
         |> StringMap.add "sku" (Code "ABC_123")
-        |> StringMap.add "lang" (Language "en")
+        |> StringMap.add "locale" (Locale "en")
         |> StringMap.add "country" (Country "US")
         |> StringMap.add "subdivision" (Subdivision "QC")
         |> StringMap.add "curr" (Currency "USD")
@@ -1987,8 +2117,8 @@ let test_of_vof ctx
   if qty <> ((5, 0), Some "EA") then Alcotest.fail "qty mismatch";
   let code = require "sku" (Read.code (get "sku" o)) in
   if code <> "ABC_123" then Alcotest.failf "sku: expected ABC_123 got %s" code;
-  let lang = require "lang" (Read.language (get "lang" o)) in
-  if lang <> "en" then Alcotest.failf "lang: expected en got %s" lang;
+  let locale = require "locale" (Read.locale (get "locale" o)) in
+  if locale <> "en" then Alcotest.failf "locale: expected en got %s" locale;
   let country = require "country" (Read.country (get "country" o)) in
   if country <> "US" then Alcotest.failf "country: expected US got %s" country;
   let subdiv = require "subdivision" (Read.subdivision (get "subdivision" o)) in
@@ -4037,6 +4167,17 @@ let () =
             test_context_schema_evolution;
           Alcotest.test_case "ns qualifiers save/load" `Quick
             test_context_ns_qualifiers_save_load;
+          Alcotest.test_case "aka save/load" `Quick test_context_aka_save_load;
+          Alcotest.test_case "path normalization" `Quick
+            test_context_path_normalization;
+        ] );
+      ( "Enum",
+        [
+          Alcotest.test_case "make and lookup" `Quick test_enum_make_and_lookup;
+          Alcotest.test_case "canonical" `Quick test_enum_canonical;
+          Alcotest.test_case "add, mem, iter, aliases" `Quick
+            test_enum_add_mem_iter_aliases;
+          Alcotest.test_case "invalid characters" `Quick test_enum_invalid_char;
         ] );
       ( "Float16",
         [

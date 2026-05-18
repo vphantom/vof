@@ -30,6 +30,7 @@ module IntMap : Map.S with type key = int
 type schema = private { path: string; keys: string list; reqs: string list }
 
 type field_qual =
+  | Aka of string list
   | Key
   | Req
   | List_of of string
@@ -60,7 +61,7 @@ type t =
   | Datetime of datetime
   | Timespan of timespan
   | Code of string
-  | Language of string
+  | Locale of string
   | Country of string
   | Subdivision of string
   | Currency of string
@@ -241,7 +242,7 @@ module Read : sig
   val float : t -> float option
   val string : t -> string option
   val code : t -> string option
-  val language : t -> string option
+  val locale : t -> string option
   val country : t -> string option
   val subdivision : t -> string option
   val currency : t -> string option

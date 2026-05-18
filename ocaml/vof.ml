@@ -13,7 +13,8 @@ exception Vof_bad_field
 
 type schema = { path: string; keys: string list; reqs: string list }
 
-and field_qual =
+type field_qual =
+  | Aka of string list
   | Key
   | Req
   | List_of of string
@@ -59,7 +60,7 @@ type t =
   | Datetime of datetime
   | Timespan of timespan
   | Code of string
-  | Language of string
+  | Locale of string
   | Country of string
   | Subdivision of string
   | Currency of string
@@ -97,12 +98,12 @@ module Context = struct
     mutable is_key: bool;
     mutable is_req: bool;
     mutable list_of: string option;
+    mutable aka: string list option;
     mutable other: string option StringMap.t;
   }
 
   type index = {
-    mutable sym_ids: int StringMap.t;
-    mutable id_syms: string array;
+    mutable enum: Enum.t;
     mutable ns_qualifiers: StringSet.t;
     mutable fields: field StringMap.t;
     mutable keys: string list;
@@ -133,15 +134,16 @@ module Context = struct
       is_key = false;
       is_req = false;
       list_of = None;
+      aka = None;
       other = StringMap.empty;
     }
   ;;
 
   let idx_make ctx path =
+    let path = ns_str path in
     let idx =
       {
-        sym_ids = StringMap.empty;
-        id_syms = [||];
+        enum = Enum.empty;
         ns_qualifiers = StringSet.empty;
         fields = StringMap.empty;
         keys = [];
@@ -155,31 +157,29 @@ module Context = struct
   ;;
 
   let idx_id ctx idx s =
-    match ctx.update, StringMap.find_opt s idx.sym_ids with
+    match ctx.update, Enum.lookup idx.enum s with
     | false, None -> die_arg "Context.idx_id" "unknown symbol %s" s
     | true, None ->
-      let id = Array.length idx.id_syms in
-      idx.id_syms <- Array.append idx.id_syms [| s |];
-      idx.sym_ids <- StringMap.add s id idx.sym_ids;
-      idx.fields <- StringMap.add s (field_make s) idx.fields;
+      let id = Enum.length idx.enum in
+      idx.enum <- Enum.add idx.enum [ s ];
+      idx.fields <- StringMap.add (sym_str s) (field_make s) idx.fields;
       ctx.modified <- true;
       id
     | _, Some id -> id
   ;;
 
-  let idx_sym idx id =
-    if id < 0 || id >= Array.length idx.id_syms
-    then None
-    else Some (Array.unsafe_get idx.id_syms id)
-  ;;
+  let idx_sym idx id = Enum.canonical_opt idx.enum id
 
   let add_schema ctx ?fields path =
+    let path = ns_str path in
     let field_of_fql symbol fql =
+      let aka = ref None in
       let is_key = ref false in
       let is_req = ref false in
       let list_of = ref None in
       let other = ref StringMap.empty in
       let each = function
+        | Aka sl -> aka := Some sl
         | Key -> is_key := true
         | Req -> is_req := true
         | List_of s -> list_of := Some s
@@ -191,13 +191,14 @@ module Context = struct
         is_key = !is_key;
         is_req = !is_req;
         list_of = !list_of;
+        aka = !aka;
         other = !other;
       }
     in
     let validate_ctx idx fs =
       let each (name, fql) =
         let field = field_of_fql name fql in
-        match StringMap.find_opt name idx.fields with
+        match StringMap.find_opt (sym_str name) idx.fields with
         | None -> die_arg "Context.schema" "unknown field %s" name
         | Some orig ->
           if orig.is_key <> field.is_key
@@ -205,7 +206,9 @@ module Context = struct
           if orig.is_req <> field.is_req
           then die_arg "Context.schema" "is_req mismatch for  %s" name;
           if orig.list_of <> field.list_of
-          then die_arg "Context.schema" "list_of mismatch for %s" name
+          then die_arg "Context.schema" "list_of mismatch for %s" name;
+          if orig.aka <> field.aka
+          then die_arg "Context.schema" "aka mismatch for %s" name
       in
       List.iter each fs
     in
@@ -215,14 +218,17 @@ module Context = struct
       idx.reqs <- [];
       let new_names = ref StringSet.empty in
       let update_one (name, fql) =
-        new_names := StringSet.add name !new_names;
+        let normal_name = sym_str name in
+        new_names := StringSet.add normal_name !new_names;
         let f_new = field_of_fql name fql in
         if f_new.is_key then idx.keys <- idx.keys @ [ name ];
         if f_new.is_req then idx.reqs <- idx.reqs @ [ name ];
-        match StringMap.find_opt name idx.fields with
+        match StringMap.find_opt normal_name idx.fields with
         | None -> (
           idx_id ctx idx name |> ignore;
-          idx.fields <- StringMap.add name f_new idx.fields;
+          let aka = Option.value ~default:[] f_new.aka in
+          idx.enum <- Enum.set_aliases idx.enum name aka;
+          idx.fields <- StringMap.add normal_name f_new idx.fields;
           match f_new.list_of with
           | None -> ()
           | Some s -> idx.lists <- StringMap.add s name idx.lists
@@ -250,6 +256,14 @@ module Context = struct
             | None -> ()
             | Some s -> idx.lists <- StringMap.add s name idx.lists
           );
+          if f_new.aka <> f_old.aka
+          then (
+            changed := true;
+            f_old.aka <- f_new.aka;
+            Option.iter
+              (fun aka -> idx.enum <- Enum.set_aliases idx.enum name aka)
+              f_new.aka
+          );
           let update_other s o =
             match StringMap.find_opt s f_old.other with
             | Some o' when o = o' -> ()
@@ -260,7 +274,7 @@ module Context = struct
           StringMap.iter update_other f_new.other
       in
       let update_kr name f =
-        if not (StringSet.mem name !new_names)
+        if not (StringSet.mem (sym_str name) !new_names)
         then (
           f.is_key <- false;
           f.is_req <- false
@@ -292,23 +306,21 @@ module Context = struct
       update;
       modified = false;
       file = None;
-      root;
+      root = ns_str root;
       registry = StringMap.empty;
       msg_idx = None;
       fetchers = StringMap.empty;
     }
   ;;
 
-  let add ctx path =
-    if not ctx.update then die_arg "Context.add" "not in update mode";
-    let idx = idx_make ctx path in
-    idx
-  ;;
-
   let idx_lookup ctx path =
+    let path = ns_str path in
     match StringMap.find_opt path ctx.registry with
-    | None -> add ctx path
     | Some idx -> idx
+    | None ->
+      if not ctx.update then die_arg "Context.idx_lookup" "not in update mode";
+      let idx = idx_make ctx path in
+      idx
   ;;
 
   let lookup_id ctx path s =
@@ -317,7 +329,7 @@ module Context = struct
   ;;
 
   let lookup_create ctx path =
-    match StringMap.find_opt path ctx.registry with
+    match StringMap.find_opt (ns_str path) ctx.registry with
     | Some idx -> idx
     | None ->
       let idx = idx_make ctx path in
@@ -356,10 +368,9 @@ module Context = struct
       | s :: _ when String.length s > 0 && s.[0] = '#' -> ()
       | "" :: symbol :: quals ->
         let- idx = !current_idx in
-        let id = StringMap.cardinal idx.sym_ids in
-        if StringMap.mem symbol idx.sym_ids
+        if Enum.mem idx.enum symbol
         then die_arg "Context.load" "duplicate symbol";
-        idx.sym_ids <- StringMap.add symbol id idx.sym_ids;
+        let names = ref [ symbol ] in
         let field = field_make symbol in
         let parse_qual q =
           match String.split_on_char ':' q with
@@ -368,28 +379,31 @@ module Context = struct
           | [ "list"; v ] ->
             field.list_of <- Some v;
             idx.lists <- StringMap.add v symbol idx.lists
+          | [ "aka"; aliases ] -> (
+            match String.split_on_char ',' aliases with
+            | [] -> ()
+            | aliases ->
+              field.aka <- Some aliases;
+              names := symbol :: aliases
+          )
           | [ k; v ] -> field.other <- StringMap.add k (Some v) field.other
           | [ k ] -> field.other <- StringMap.add k None field.other
           | _ -> die_arg "Context.load" "malformed qualifier %s" q
         in
         List.iter parse_qual quals;
-        idx.fields <- StringMap.add symbol field idx.fields;
+        idx.enum <- Enum.add idx.enum !names;
+        idx.fields <- StringMap.add (sym_str symbol) field idx.fields;
         if field.is_key then idx.keys <- idx.keys @ [ symbol ];
         if field.is_req then idx.reqs <- idx.reqs @ [ symbol ]
       | path :: quals ->
+        let path = ns_str path in
         if not (String.starts_with ~prefix path)
         then die_arg "Context.load" "unexpected path %s" path;
         let idx = lookup_create ctx path in
         idx.ns_qualifiers <- StringSet.of_list quals;
         current_idx := Some idx
     in
-    split_on_2chars '\r' '\n' contents |> List.iter each_line;
-    let each_idx _ idx =
-      let arr = Array.make (StringMap.cardinal idx.sym_ids) "" in
-      StringMap.iter (fun sym id -> arr.(id) <- sym) idx.sym_ids;
-      idx.id_syms <- arr
-    in
-    StringMap.iter each_idx ctx.registry
+    split_on_2chars '\r' '\n' contents |> List.iter each_line
   ;;
 
   let save ctx =
@@ -410,29 +424,39 @@ module Context = struct
         let each_sym sym =
           Buffer.add_char buf '\t';
           Buffer.add_string buf sym;
-          ( match StringMap.find_opt sym idx.fields with
+          ( match StringMap.find_opt (sym_str sym) idx.fields with
           | None -> die_arg "Context.save" "missing field %s" sym
           | Some field ->
             let open Buffer in
+            let write_qual k vo =
+              add_char buf ' ';
+              add_string buf k;
+              Option.iter (fun v -> add_char buf ':'; add_string buf v) vo
+            in
             let write_kv k v =
               add_char buf ' ';
               add_string buf k;
               add_char buf ':';
               add_string buf v
             in
-            let write_qual k vo =
-              add_char buf ' ';
-              add_string buf k;
-              Option.iter (fun v -> add_char buf ':'; add_string buf v) vo
+            let write_kmv k = function
+              | [] -> ()
+              | first :: rest ->
+                add_char buf ' ';
+                add_string buf k;
+                add_char buf ':';
+                add_string buf first;
+                List.iter (fun v -> add_char buf ','; add_string buf v) rest
             in
             if field.is_key then add_string buf " key";
             if field.is_req then add_string buf " req";
             Option.iter (write_kv "list") field.list_of;
+            Enum.aliases_str idx.enum sym |> write_kmv "aka";
             StringMap.iter write_qual field.other
           );
           Buffer.add_char buf '\n'
         in
-        Array.iter each_sym idx.id_syms
+        Enum.iter each_sym idx.enum
       in
       StringMap.iter each_ns ctx.registry;
       Out_channel.with_open_bin path (fun oc -> Buffer.output_buffer oc buf);
@@ -541,7 +565,7 @@ module Read = struct
     | Raw_bstr s
     | String s
     | Code s
-    | Language s
+    | Locale s
     | Country s
     | Subdivision s
     | Currency s
@@ -555,7 +579,7 @@ module Read = struct
   ;;
 
   let code = string
-  let language = string
+  let locale = string
   let country = string
   let subdivision = string
   let currency = string
@@ -1048,7 +1072,7 @@ let rec pp = function
   | Float f -> Float.to_string f
   | String s -> Printf.sprintf "%S" s
   | Code s
-  | Language s
+  | Locale s
   | Country s
   | Subdivision s
   | Currency s

@@ -27,14 +27,13 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                      | `list[uint,uint,uint,uint,uint]`     |
 | `timestamp`       | `int` Epoch                                                   | `int` UNIX Epoch                     |
 | `timespan`/`span` | `list[int,int,int]`                                           | _same_                               |
-| `code`            | `string` strictly `[A-Z0-9_]`                                 | _same_                               |
-| `language`/`lang` | `code` IETF BCP-47                                            | _same_                               |
-| `country`/`cntry` | `code` ISO 3166-1 alpha-2                                     | _same_                               |
-| `subdivision`     | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)          | _same_                               |
-| `currency`/`curr` | `code` ISO 4217 alpha-3                                       | _same_                               |
-| `tax_code`        | `code` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym      | _same_                               |
-| `unit`            | `code` UN/CEFACT Rec. 20                                      | _same_                               |
-| `text`            | `strmap` of `lang,string` pairs<br />`string` for just one    | _same_                               |
+| `locale`          | `$locale enum` IETF BCP-47                                    | _same_                               |
+| `country`/`cntry` | `$country enum` ISO 3166-1 alpha-2                            | _same_                               |
+| `subdivision`     | `$subdivision enum` ISO 3166-2 alpha-1/3<br />(no country prefix) | _same_                               |
+| `currency`/`curr` | `$currency enum` ISO 4217 alpha-3                             | _same_                               |
+| `tax_code`        | `$tax enum` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym | _same_                               |
+| `unit`            | `$unit enum` UN/CEFACT Rec. 20                                | _same_                               |
+| `text`            | `$locale record` of strings<br />`string` for just one        | _same_                               |
 | `amount`/`price`  | String: `dec`<br />+ optional space and `curr`                | `list[dec,curr]` / `dec`             |
 | `tax`/`tax_amt`   | String: `dec`<br />+ optional space and `curr`<br />+ mandatory space + `tax_code` | `list[dec,tax_code,curr]`<br />`list[dec,tax_code]`  |
 | `quantity`        | String: `dec`<br />+ optional space and `unit`                | `list[dec,unit]` / `dec`             |
@@ -60,15 +59,19 @@ We use codes from UN/CEFACT Recommendation 20.  See full list at: [unece.org](ht
 
 ### Namespaces: Variant, Enum, Record
 
-A project or API has a root namespace, dot-delimited, i.e. `com.example`.
+A project or API has a root namespace, dot-delimited, i.e. `com.example`
 
-Variant, Enum and Record types need unique namespaces in singular form, for example: `com.example.order.line`
+Variant, Enum and Record types need unique namespaces in singular form, for example: `com.example.order.line`.  Namespaces only allow characters: `[$0-9A-Za-z._-]` and are upper/lower case and hyphen/underscore insensitive.
+
+Namespaces suggested by VOF are at root level and begin with a dollar sign, like `com.example.$locale`.  Applications should not use dollar signs in their own namespaces.  The namespaces are: `$msg`, `$locale`, `$country`, `$subdivision`, `$currency`, `$tax`, `$unit`.
 
 <!-- advanced -->
 
-Identifiers within a namespace are strings (JSON) and unsigned integers starting from 0 (CBOR, similar to Protobuf).  To avoid version conflicts, **identifiers must remain reserved forever when they are deprecated.**  Variants and Enums should have their first or all letters uppercase while record field names should begin with a lowercase letter.
+Identifiers within a namespace are strings (JSON) and unsigned integers starting from 0 (CBOR, similar to Protobuf).  To avoid version conflicts, **identifiers must remain reserved forever when they are deprecated.**  Symbols are restricted to characters `[0-9A-Za-z_-]` and are upper/lower case and hyphen/underscore insensitive.
 
 In CBOR, variants, enums and record fields are identified by a unique unsigned integer (similar to Protobuf), which should also be reserved forever.  For a given context (for example, a company's HTTP API), encoders should maintain a global, namespaced symbol table.  Applications calling encoder functions for these three types must provide a namespace (i.e. `com.example.order.line`) in which field names will be assigned integers starting from zero as they are first encountered.  This table must be managed centrally and shared with other endpoints (much like Protobuf IDL `.proto` files must be shared among endpoints).
+
+Decoders must use the canonical string (as specified in the symbol table) when decoding integers to strings.  Thus, even if symbols are case insensitive, the string returned must match the initial declaration, allowing applications to use symbols like "USD", "en_US", etc.  Encoders must accept aliases on input but only emit canonical symbols on output.  (Thus even in JSON, a declared "en_US" specified as "en" in a Text must still be encoded as "en_US".)
 
 Symbol tables are simple 7-bit ASCII files listing symbols in field order and are thus strictly append-only for each namespace, to preserve field IDs forever.
 
@@ -83,13 +86,23 @@ Symbol tables are simple 7-bit ASCII files listing symbols in field order and ar
 # VOF Symbol Table
 
 com.example.$msg
-    orders list:com.example.orders
-    ; ... custom fields
+	orders list:com.example.orders
+	; ... custom fields
+
+com.example.$currency
+	USD
+	CAD
+	EUR
+
+com.example.$locale
+	en_US aka:en,en_CA
+	fr_CA aka:fr
 
 com.example.order
 	id key
 	modified_at req
 	customer
+	currency
 	lines
 	total
 
@@ -104,8 +117,9 @@ In the above example, symbol 'customer' in namespace 'com.example.order' is ID `
 
 #### Symbol Qualifiers
 
-Qualifiers may be simple tags or "key:value" pairs.
+Qualifiers may be simple tags or "key:value" pairs or "key:v1,v2,..." multi-value pairs.
 
+* **aka** — Aliases for the current symbol, reserved forever.  Implementations must fail when an application or symbol table file sets the same alias on multiple symbols.
 * **key** — In records, tags a field as being part of the primary key.
 * **req** — In record references, tags a field to always include along with keys.
 * **list:** — In the `$msg` namespace in your root path, tags fields which intended as lists of records with their full path.  When reading, if multiple symbols are declared as lists of the same path, the last one prevails.
@@ -190,9 +204,9 @@ Calendar duration expressed as half-months, days and seconds, each signed and ap
 
 ### Text
 
-If multiple strings are provided with the same language code, the first one wins.  Used in its bare `string` form, it is up to the applications to agree on the choice of default language.
+If multiple strings are provided with the same locale code, the first one wins.  Used in its bare `string` form, it is up to the applications to agree on the choice of default locale.  `$locale` should include aliases for bare languages exactly once per language group, for whichever qualified locale is the application's default for the language.
 
-The canonical encoding is to use the bare `string` form when a single language is used and corresponds to the default language (if one is defined), to minimize space.
+The canonical encoding is to use the bare `string` form when a single locale is used and corresponds to the default locale (if one is defined), to minimize space.
 
 ## JSON Encoding
 
@@ -253,7 +267,7 @@ If you need to issue multiple API requests within a few seconds, HTTP/1.1 `keepa
 * Variant/Enum/Record use `Capitalized` names.  Dependent records are namespaced in their parent, i.e. `Order.Line` used by `Order`.
 * Fields use `snake_case`.  Pluralize lists (i.e. `lines`)
 * Field names with multiple words should go from most to least precise (i.e. prefer `item_qty` over `qty_item`)
-* Suffix non-self-describing field names to clarify their type when the value might not be obvious: `_code`, `_id`, `_amt` or `_price`, `_qty`, `_tax`
+* Suffix non-self-describing field names to clarify their type when the value might not be obvious: `_id`, `_amt` or `_price`, `_qty`, `_tax`
 
 
 ### GET Parameters
@@ -426,7 +440,6 @@ Encoders are encouraged to use Gzip or Zstd compression for VOF messages exceedi
 
 * The `decimal`, `date` and `datetime` types were designed for financial systems based on SQLite and kept here for their compact sizes.
 * Negative decimals incur a one-byte penalty to optimize for positive cases which dominate in business applications.
-* The `code` type was initially designed as a base 37 `uint`, but the space savings were not worth the implementation complexity.
 * The last size of `decimal` is 9 and not 7 in order to match the maximum precision allowed in some other business contexts such as ANSI X12.
 
 <!-- /advanced -->
