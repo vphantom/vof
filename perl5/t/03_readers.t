@@ -97,7 +97,6 @@ subtest 'as_string' => sub {
 	is(as_string(vof_string("hi")), "hi", "typed string");
 	is(as_string(raw_str("hello")), "hello", "raw string");
 	is(as_string(vof_int(42)), "42", "int stringified");
-	is(as_string(vof_code("ABC")), "ABC", "code → string");
 	is(as_string(vof_currency("USD")), "USD", "currency → string");
 	is(as_string(vof_uint(10)), "10", "uint stringified");
 	is(as_string(raw_int(77)), "77", "raw int stringified");
@@ -120,14 +119,13 @@ subtest 'as_data' => sub {
 # ===== Code readers (aliases of as_string) =====
 
 subtest 'code readers' => sub {
-	my $v = vof_language("en");
-	is(as_language($v), "en", "as_language");
+	my $v = vof_locale("en");
+	is(as_locale($v), "en", "as_locale");
 	is(as_country(vof_country("CA")), "CA", "as_country");
 	is(as_subdivision(vof_subdivision("QC")), "QC", "as_subdivision");
 	is(as_currency(vof_currency("USD")), "USD", "as_currency");
 	is(as_tax_code(vof_tax_code("CA_GST")), "CA_GST", "as_tax_code");
 	is(as_unit(vof_unit("KGM")), "KGM", "as_unit");
-	is(as_code(vof_code("X1")), "X1", "as_code");
 };
 
 # ===== as_decimal =====
@@ -309,6 +307,28 @@ subtest 'as_text' => sub {
 	my $raw = raw_list([raw_str("en"), raw_str("Hello")]);
 	my $r = as_text($raw);
 	is($r->{en}, "Hello", "raw object fallback");
+
+	# With context: bare string → keyed by default locale
+	my $ctx = VOF::Context->new("test");
+	$ctx->load("t/data/test_symbols.txt");
+	my $bs = as_text(raw_str("Hello"), $ctx);
+	is_deeply($bs, { "en_US" => "Hello" }, "bare string + context → default locale key");
+
+	# Without context: bare string → keyed by ""
+	my $bs2 = as_text(raw_str("Hello"));
+	is_deeply($bs2, { "" => "Hello" }, "bare string without context → empty key");
+
+	# With context: strmap keys canonicalized
+	my $raw2 = raw_list([raw_str("en"), raw_str("Hi"), raw_str("fr"), raw_str("Salut")]);
+	my $r2 = as_text($raw2, $ctx);
+	is($r2->{"en_US"}, "Hi", "alias 'en' canonicalized to 'en_US'");
+	is($r2->{"fr_CA"}, "Salut", "alias 'fr' canonicalized to 'fr_CA'");
+
+	# Typed VOF_TEXT + context: keys pass through without canonicalization
+	my $txt = as_text(vof_text({ "en" => "Hey", "fr" => "Hé" }), $ctx);
+	is($txt->{"en"}, "Hey", "typed text key 'en' passes through unchanged");
+	is($txt->{"fr"}, "Hé", "typed text key 'fr' passes through unchanged");
+	ok(!exists $txt->{"en_US"}, "typed text does not canonicalize keys");
 };
 
 # ===== as_ip =====

@@ -137,8 +137,8 @@ The mapping follows the VOF specification's JSON column:
 	VOF_TIMESPAN      => [int, int, int]
 	VOF_ENUM          => string
 	VOF_VARIANT       => [string, args...]
-	VOF_CODE etc.     => string
-	VOF_TEXT          => { lang: string, ... }
+	VOF_LOCALE etc.   => string
+	VOF_TEXT          => string (single default locale) or { lang: string, ... }
 	VOF_AMOUNT        => string ("12.50" or "12.50 USD")
 	VOF_TAX           => string ("12.50 USD GST" or "12.50 GST")
 	VOF_QUANTITY      => string ("3" or "3 KGM")
@@ -223,15 +223,28 @@ sub encode {
 	}
 
 	# Code types → string
-	if ($t == VOF_CODE || $t == VOF_LANGUAGE || $t == VOF_COUNTRY
+	if ($t == VOF_LOCALE || $t == VOF_COUNTRY
 		|| $t == VOF_SUBDIVISION || $t == VOF_CURRENCY
 		|| $t == VOF_TAX_CODE || $t == VOF_UNIT) {
 		return "$val->[1]";
 	}
 
-	# Text → { lang: string, ... }
+	# Text → bare string (single default locale) or { lang: string, ... }
 	if ($t == VOF_TEXT) {
-		return { map { $_ => "$val->[1]{$_}" } keys %{$val->[1]} };
+		my $map = $val->[1];
+		my @keys = keys %$map;
+		return "" unless @keys;
+		if (@keys == 1) {
+			my $k = $keys[0];
+			my $is_default = $ctx
+				? $ctx->is_default_locale($k)
+				: $k eq '';
+			return "$map->{$k}" if $is_default;
+		}
+		if ($ctx) {
+			return { map { $ctx->canon_locale($_) => "$map->{$_}" } @keys };
+		}
+		return { map { $_ => "$map->{$_}" } keys %$map };
 	}
 
 	# Amount → "12.50" or "12.50 USD"

@@ -251,9 +251,8 @@ subtest 'pp smoke' => sub {
 	is(pp(vof_datetime(2025, 12, 31, 23, 59)), '2025-12-31T23:59', 'datetime');
 	is(pp(vof_timestamp(1750800000)), '1750800000', 'timestamp');
 	is(pp(vof_timespan(24, -1, 0)), 'timespan[24,-1,0]', 'timespan');
-	is(pp(vof_code('ABC')), 'ABC', 'code');
 	is(pp(vof_currency('USD')), 'USD', 'currency');
-	is(pp(vof_language('en')), 'en', 'language');
+	is(pp(vof_locale('en')), 'en', 'locale');
 	is(pp(vof_country('CA')), 'CA', 'country');
 	is(pp(vof_amount(1250, 2, 'USD')), '12.5USD', 'amount with currency');
 	is(pp(vof_amount(1250, 2)), '12.5', 'amount without currency');

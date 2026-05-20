@@ -192,8 +192,7 @@ subtest 'vof_timespan' => sub {
 
 subtest 'code constructors' => sub {
 	my @codes = (
-		[\&vof_code,        VOF_CODE,        "ABC"],
-		[\&vof_language,    VOF_LANGUAGE,    "en"],
+		[\&vof_locale,      VOF_LOCALE,    "en"],
 		[\&vof_country,     VOF_COUNTRY,     "CA"],
 		[\&vof_subdivision, VOF_SUBDIVISION, "QC"],
 		[\&vof_currency,    VOF_CURRENCY,    "USD"],
@@ -207,7 +206,7 @@ subtest 'code constructors' => sub {
 		is($v->[1], $str, "value for $str");
 	}
 
-	eval { vof_code(undef) };
+	eval { vof_unit(undef) };
 	like($@, qr/string required/, "undef croaks");
 };
 

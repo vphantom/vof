@@ -18,3 +18,12 @@ test.status
 	Confirmed
 	Shipped
 	Delivered
+
+test.$locale
+	en_US aka:en,en_CA
+	fr_CA aka:fr
+
+test.$currency
+	USD
+	CAD aka:cd
+	EUR

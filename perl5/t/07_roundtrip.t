@@ -111,7 +111,7 @@ subtest 'timespan round-trip' => sub {
 
 subtest 'code types round-trip' => sub {
 	for my $pair (
-		[vof_language("en"),          \&as_language,    "en"],
+		[vof_locale("en"),            \&as_locale,      "en"],
 		[vof_country("CA"),           \&as_country,     "CA"],
 		[vof_currency("USD"),         \&as_currency,    "USD"],
 		[vof_unit("KGM"),             \&as_unit,        "KGM"],
@@ -191,6 +191,21 @@ subtest 'text round-trip' => sub {
 	my $t = as_text($r);
 	is($t->{en}, "Hi", "text en");
 	is($t->{fr}, "Salut", "text fr");
+};
+
+subtest 'text with context round-trip' => sub {
+	my $ctx = VOF::Context->new("test");
+	$ctx->load("t/data/test_symbols.txt");
+
+	# Single default locale → bare string on wire → back to text
+	my $orig = vof_text({ "en_US" => "Hello" });
+	my $encoded = VOF::JSON::encode($orig, $ctx);
+	is($encoded, "Hello", "default locale text encodes as bare string");
+	my $json_str = JSON::encode_json([$encoded]);
+	my $decoded  = JSON::decode_json($json_str);
+	my $raw = VOF::JSON::decode($decoded->[0]);
+	my $t = as_text($raw, $ctx);
+	is_deeply($t, { "en_US" => "Hello" }, "bare string decodes back with default locale key");
 };
 
 # ===== Structured =====

@@ -106,8 +106,7 @@ subtest 'timespan' => sub {
 # ===== Code types =====
 
 subtest 'code types' => sub {
-	is(VOF::JSON::encode(vof_code("ABC")), "ABC", "code");
-	is(VOF::JSON::encode(vof_language("en")), "en", "language");
+	is(VOF::JSON::encode(vof_locale("en")), "en", "locale");
 	is(VOF::JSON::encode(vof_country("CA")), "CA", "country");
 	is(VOF::JSON::encode(vof_subdivision("QC")), "QC", "subdivision");
 	is(VOF::JSON::encode(vof_currency("USD")), "USD", "currency");
@@ -122,6 +121,27 @@ subtest 'text' => sub {
 	is(ref $e, "HASH", "text → hash");
 	is($e->{en}, "Hi", "en");
 	is($e->{fr}, "Salut", "fr");
+
+	# With context: single default locale → bare string
+	my $ctx = VOF::Context->new("test");
+	$ctx->load("t/data/test_symbols.txt");
+	my $e2 = VOF::JSON::encode(vof_text({ "en_US" => "Hi" }), $ctx);
+	is($e2, "Hi", "single default locale + context → bare string");
+
+	# With context: single non-default locale → object
+	my $e3 = VOF::JSON::encode(vof_text({ "fr_CA" => "Salut" }), $ctx);
+	is(ref $e3, "HASH", "single non-default locale + context → hash");
+	is($e3->{"fr_CA"}, "Salut", "non-default locale preserved");
+
+	# With context: multi-entry → object with canonical keys
+	my $e4 = VOF::JSON::encode(vof_text({ "en_US" => "Hi", "fr_CA" => "Salut" }), $ctx);
+	is(ref $e4, "HASH", "multi-entry + context → hash");
+	is($e4->{"en_US"}, "Hi", "canonical key en_US");
+	is($e4->{"fr_CA"}, "Salut", "canonical key fr_CA");
+
+	# Empty text map → empty string
+	my $e5 = VOF::JSON::encode(vof_text({}));
+	is($e5, "", "empty text → empty string");
 };
 
 # ===== Qualified decimals =====

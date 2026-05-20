@@ -91,7 +91,7 @@ BEGIN {
 		VOF_ENUM VOF_VARIANT
 		VOF_DECIMAL VOF_RATIO VOF_PERCENT
 		VOF_TIMESTAMP VOF_DATE VOF_DATETIME VOF_TIMESPAN
-		VOF_CODE VOF_LANGUAGE VOF_COUNTRY VOF_SUBDIVISION
+		VOF_LOCALE VOF_COUNTRY VOF_SUBDIVISION
 		VOF_CURRENCY VOF_TAX_CODE VOF_UNIT
 		VOF_TEXT
 		VOF_AMOUNT VOF_TAX VOF_QUANTITY
@@ -114,7 +114,7 @@ my @CONSTANTS = qw(
 	VOF_ENUM VOF_VARIANT
 	VOF_DECIMAL VOF_RATIO VOF_PERCENT
 	VOF_TIMESTAMP VOF_DATE VOF_DATETIME VOF_TIMESPAN
-	VOF_CODE VOF_LANGUAGE VOF_COUNTRY VOF_SUBDIVISION
+	VOF_LOCALE VOF_COUNTRY VOF_SUBDIVISION
 	VOF_CURRENCY VOF_TAX_CODE VOF_UNIT
 	VOF_TEXT
 	VOF_AMOUNT VOF_TAX VOF_QUANTITY
@@ -129,7 +129,7 @@ my @CONSTRUCTORS = qw(
 	vof_null vof_bool vof_int vof_uint vof_float vof_string vof_data
 	vof_decimal vof_ratio vof_percent
 	vof_timestamp vof_date vof_datetime vof_timespan
-	vof_code vof_language vof_country vof_subdivision
+	vof_locale vof_country vof_subdivision
 	vof_currency vof_tax_code vof_unit
 	vof_text
 	vof_amount vof_tax vof_quantity
@@ -140,7 +140,7 @@ my @CONSTRUCTORS = qw(
 
 my @READERS = qw(
 	as_bool as_int as_uint as_float as_string
-	as_code as_language as_country as_subdivision
+	as_locale as_country as_subdivision
 	as_currency as_tax_code as_unit
 	as_data
 	as_decimal as_ratio as_percent
@@ -202,8 +202,7 @@ vary by type:
 	VOF_DATE        [tag, $y, $m, $d]
 	VOF_DATETIME    [tag, $y, $m, $d, $hh, $mm]
 	VOF_TIMESPAN    [tag, $half_months, $days, $seconds]
-	VOF_CODE        [tag, $string]
-	VOF_LANGUAGE    [tag, $string]           IETF BCP-47
+	VOF_LOCALE      [tag, $string]           IETF BCP-47
 	VOF_COUNTRY     [tag, $string]           ISO 3166-1 alpha-2
 	VOF_SUBDIVISION [tag, $string]           ISO 3166-2
 	VOF_CURRENCY    [tag, $string]           ISO 4217 alpha-3
@@ -302,8 +301,10 @@ Returns C<$ctx> for chaining.  Croaks on I/O errors or malformed input.
 The file format is described in the VOF specification.  Lines starting with
 C<#> are comments; lines starting with a TAB are symbol definitions in the
 current namespace; other lines are namespace declarations.  Symbol lines may
-carry whitespace-delimited qualifiers (C<key>, C<req>); unknown qualifiers are
-silently ignored.
+carry whitespace-delimited qualifiers such as C<key>, C<req> and
+C<aka:alias1,alias2>; unknown qualifiers are silently ignored.  Aliases are
+registered in the symbol lookup table, so L</id_by_sym> and the C<canon_*>
+methods resolve them to their canonical symbol.
 
 =head2 C<< $ctx->schema($path, %opts) >>
 
@@ -366,7 +367,7 @@ package VOF::Context {
 
 	sub new {
 		my ($class, $root) = @_;
-		return bless { root => $root, namespaces => {} }, $class;
+		return bless { root => VOF::_ns_str($root), namespaces => {} }, $class;
 	}
 
 	sub load {
@@ -381,24 +382,49 @@ package VOF::Context {
 			if ($line =~ /^\t(.+)/) {
 				next unless defined $current_ns;
 				my ($symbol, @quals) = split /\s+/, $1;
-				my %flags = map { $_ => 1 } @quals;
 				my $ns = ($self->{namespaces}{$current_ns} ||= {
 					symbols  => [],
 					sym_ids  => {},
 					keys     => [],
 					required => [],
 				});
+				my $norm_sym = VOF::_sym_str($symbol);
+				croak "VOF::Context: duplicate symbol '$symbol'"
+					if exists $ns->{sym_ids}{$norm_sym};
 				push @{$ns->{symbols}}, $symbol;
-				$ns->{sym_ids}{$symbol} = $#{$ns->{symbols}};
-				if ($flags{key}) {
+				$ns->{sym_ids}{$norm_sym} = $#{$ns->{symbols}};
+
+				# Parse qualifiers: "flag" or "key:value" or "key:v1,v2,..."
+				my %parsed;
+				for my $q (@quals) {
+					if ($q =~ /^([^:]+):(.+)\z/) {
+						$parsed{$1} = $2;
+					}
+					else {
+						$parsed{$q} = 1;
+					}
+				}
+
+				# Register aliases
+				if (defined $parsed{aka}) {
+					for my $alias (split /,/, $parsed{aka}) {
+						my $norm_alias = VOF::_sym_str($alias);
+						croak "VOF::Context: duplicate alias '$alias'"
+							if exists $ns->{sym_ids}{$norm_alias};
+						$ns->{sym_ids}{$norm_alias} = $#{$ns->{symbols}};
+					}
+				}
+
+				if ($parsed{key}) {
 					push @{$ns->{keys}}, $symbol;
 				}
-				elsif ($flags{req}) {
+				elsif ($parsed{req}) {
 					push @{$ns->{required}}, $symbol;
 				}
 			}
 			else {
 				my ($path) = split /\s+/, $line;
+				$path = VOF::_ns_str($path);
 				if (index($path, $root_prefix) == 0) {
 					$current_ns = $path;
 				}
@@ -417,7 +443,7 @@ package VOF::Context {
 
 	sub schema {
 		my ($self, $rel_path, %opts) = @_;
-		my $path       = "$self->{root}.$rel_path";
+		my $path       = VOF::_ns_str("$self->{root}.$rel_path");
 		my $ns         = $self->{namespaces}{$path};
 		my $hint_keys  = $opts{keys};
 		my $hint_req   = $opts{required};
@@ -443,16 +469,69 @@ package VOF::Context {
 
 	sub sym_by_id {
 		my ($self, $path, $id) = @_;
-		my $ns = $self->{namespaces}{$path} or return undef;
+		my $ns = $self->{namespaces}{VOF::_ns_str($path)} or return undef;
 		my $syms = $ns->{symbols};
 		return ($id >= 0 && $id < scalar @$syms) ? $syms->[$id] : undef;
 	}
 
 	sub id_by_sym {
 		my ($self, $path, $name) = @_;
-		my $ns = $self->{namespaces}{$path} or return undef;
-		return $ns->{sym_ids}{$name};
+		my $ns = $self->{namespaces}{VOF::_ns_str($path)} or return undef;
+		return $ns->{sym_ids}{VOF::_sym_str($name)};
 	}
+
+	# Internal: canonicalize a symbol in a $-prefixed namespace.
+	# Returns canonical form if found, original string otherwise.
+	sub _canon {
+		my ($self, $ns_suffix, $s) = @_;
+		my $ns = $self->{namespaces}{"$self->{root}.\$$ns_suffix"}
+			or return $s;
+		my $id = $ns->{sym_ids}{VOF::_sym_str($s)};
+		return defined $id ? $ns->{symbols}[$id] : $s;
+	}
+
+	# Returns true if $s is the default locale (ID 0 with $locale, "" without).
+	sub is_default_locale {
+		my ($self, $s) = @_;
+		my $ns = $self->{namespaces}{"$self->{root}.\$locale"};
+		if (!$ns) {
+			return $s eq '';
+		}
+		my $id = $ns->{sym_ids}{VOF::_sym_str($s)};
+		return defined $id && $id == 0;
+	}
+
+=head2 C<< $ctx->is_default_locale( $string ) >>
+
+Returns true if C<$string> is the default locale.  When a C<$locale> namespace
+is loaded, the default is the symbol at index 0 (including aliases).  Without a
+C<$locale> namespace, the default is the empty string C<"">.
+
+=head2 C<< $ctx->canon_locale( $string ) >>
+
+=head2 C<< $ctx->canon_country( $string ) >>
+
+=head2 C<< $ctx->canon_subdivision( $string ) >>
+
+=head2 C<< $ctx->canon_currency( $string ) >>
+
+=head2 C<< $ctx->canon_tax_code( $string ) >>
+
+=head2 C<< $ctx->canon_unit( $string ) >>
+
+Normalize a symbol (or alias) to its canonical form using the corresponding
+C<$>-prefixed namespace (C<$locale>, C<$country>, C<$subdivision>, C<$currency>,
+C<$tax>, C<$unit>).  Returns the canonical string if found, or the original
+string unchanged if the namespace does not exist or the symbol is unknown.
+
+=cut
+
+	sub canon_locale      { $_[0]->_canon('locale',      $_[1]) }
+	sub canon_country     { $_[0]->_canon('country',      $_[1]) }
+	sub canon_subdivision { $_[0]->_canon('subdivision',  $_[1]) }
+	sub canon_currency    { $_[0]->_canon('currency',     $_[1]) }
+	sub canon_tax_code    { $_[0]->_canon('tax',          $_[1]) }
+	sub canon_unit        { $_[0]->_canon('unit',         $_[1]) }
 }
 
 # ###########################################################################
@@ -480,6 +559,28 @@ sub _check_value {
 	my ($label, $v) = @_;
 	croak "$label: values must be VOF::Value instances"
 		unless ref $v eq 'VOF::Value';
+}
+
+# Internal: normalize a namespace path (lowercase, hyphen→underscore,
+# allows [0-9a-z_.$]).  Mirrors vof_lib.ml ns_str.
+sub _ns_str {
+	my ($s) = @_;
+	$s = lc $s;
+	$s =~ tr/-/_/;
+	croak "VOF: invalid namespace character in '$s'"
+		if $s =~ /[^0-9a-z_.\$]/;
+	return $s;
+}
+
+# Internal: normalize a symbol name (lowercase, hyphen→underscore,
+# allows [0-9a-z_]).  Mirrors vof_lib.ml sym_str.
+sub _sym_str {
+	my ($s) = @_;
+	$s = lc $s;
+	$s =~ tr/-/_/;
+	croak "VOF: invalid symbol character in '$s'"
+		if $s =~ /[^0-9a-z_]/;
+	return $s;
 }
 
 # ###########################################################################
@@ -825,7 +926,7 @@ sub pp {
 		$s =~ s/\t/\\t/g;
 		return qq{"$s"};
 	}
-	if ($t == VOF_CODE || $t == VOF_LANGUAGE || $t == VOF_COUNTRY
+	if ($t == VOF_LOCALE || $t == VOF_COUNTRY
 		|| $t == VOF_SUBDIVISION || $t == VOF_CURRENCY
 		|| $t == VOF_TAX_CODE || $t == VOF_UNIT) {
 		return $v->[1];
@@ -1166,9 +1267,7 @@ specification for details).
 
 =over 4
 
-=item C<vof_code( $string )>
-
-=item C<vof_language( $string )>
+=item C<vof_locale( $string )>
 
 =item C<vof_country( $string )>
 
@@ -1182,8 +1281,7 @@ specification for details).
 
 =cut
 
-sub vof_code         { croak "vof_code: string required" unless defined $_[0]; VOF::Value->new(VOF_CODE, "$_[0]") }
-sub vof_language     { croak "vof_language: string required" unless defined $_[0]; VOF::Value->new(VOF_LANGUAGE, "$_[0]") }
+sub vof_locale       { croak "vof_locale: string required" unless defined $_[0]; VOF::Value->new(VOF_LOCALE, "$_[0]") }
 sub vof_country      { croak "vof_country: string required" unless defined $_[0]; VOF::Value->new(VOF_COUNTRY, "$_[0]") }
 sub vof_subdivision  { croak "vof_subdivision: string required" unless defined $_[0]; VOF::Value->new(VOF_SUBDIVISION, "$_[0]") }
 sub vof_currency     { croak "vof_currency: string required" unless defined $_[0]; VOF::Value->new(VOF_CURRENCY, "$_[0]") }
@@ -1198,7 +1296,7 @@ sub vof_unit         { croak "vof_unit: string required" unless defined $_[0]; V
 
 =item C<vof_text( \%lang_map )>
 
-Returns a C<VOF_TEXT> value.  C<%lang_map> maps language codes (IETF BCP-47
+Returns a C<VOF_TEXT> value.  C<%lang_map> maps locale codes (IETF BCP-47
 strings) to text strings, e.g. C<< { en => "Hello", fr => "Bonjour" } >>.
 
 =cut
@@ -1592,7 +1690,7 @@ sub as_string {
 	return undef unless ref $v eq 'VOF::Value';
 	my $t = $v->[0];
 	if ($t == VOF_STRING || $t == VOF_RAW_TSTR
-		|| $t == VOF_CODE || $t == VOF_LANGUAGE || $t == VOF_COUNTRY
+		|| $t == VOF_LOCALE || $t == VOF_COUNTRY
 		|| $t == VOF_SUBDIVISION || $t == VOF_CURRENCY
 		|| $t == VOF_TAX_CODE || $t == VOF_UNIT) {
 		return $v->[1];
@@ -1641,9 +1739,7 @@ as L</as_string> and return a string or C<undef>.
 
 =over 4
 
-=item C<as_code( $v )>
-
-=item C<as_language( $v )>
+=item C<as_locale( $v )>
 
 =item C<as_country( $v )>
 
@@ -1657,8 +1753,7 @@ as L</as_string> and return a string or C<undef>.
 
 =cut
 
-sub as_code         { goto &as_string }
-sub as_language     { goto &as_string }
+sub as_locale       { goto &as_string }
 sub as_country      { goto &as_string }
 sub as_subdivision  { goto &as_string }
 sub as_currency     { goto &as_string }
@@ -2008,19 +2103,46 @@ sub as_quantity {
 
 =over 4
 
-=item C<as_text( $v )>
+=item C<as_text( $v [, $ctx ] )>
 
-Returns a hashref C<< { lang_code => string, ... } >> or C<undef>.
+Returns a hashref C<< { lang_code => string, ... } >> or C<undef>.  The optional
+C<$ctx> (L<VOF::Context>) enables locale-aware behavior: bare strings are keyed
+by the default locale (ID 0), and object keys are canonicalized via the
+C<$locale> namespace.  Without a context, bare strings use C<""> as the key and
+object keys pass through unchanged.
 
 =cut
 
 sub as_text {
-	my ($v) = @_;
+	my ($v, $ctx) = @_;
 	return undef unless ref $v eq 'VOF::Value';
-	if ($v->[0] == VOF_TEXT) {
+	my $t = $v->[0];
+
+	if ($t == VOF_TEXT) {
 		return $v->[1];
 	}
-	return as_strmap($v, \&as_string);
+
+	# Bare string → single-entry text
+	if ($t == VOF_RAW_TSTR || $t == VOF_STRING) {
+		my $key = "";
+		if ($ctx) {
+			my $locale_path = "$ctx->{root}.\$locale";
+			$key = $ctx->sym_by_id($locale_path, 0) // "";
+		}
+		return { $key => $v->[1] };
+	}
+
+	# Object / strmap → canonicalize keys if context available
+	my $raw = as_strmap($v, \&as_string);
+	return undef unless defined $raw;
+	if ($ctx) {
+		my %canon;
+		for my $k (keys %$raw) {
+			$canon{$ctx->canon_locale($k)} = $raw->{$k};
+		}
+		return \%canon;
+	}
+	return $raw;
 }
 
 =back

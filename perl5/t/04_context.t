@@ -129,4 +129,105 @@ subtest 'is_reference' => sub {
 	ok(!$s->is_reference({ id => 1, modified_at => 2, total => 3 }), "with total → not ref");
 };
 
+# ===== Invalid namespace/symbol characters =====
+
+subtest 'invalid namespace characters' => sub {
+	eval { VOF::Context->new("test space") };
+	like($@, qr/invalid namespace/, "space in namespace croaks");
+
+	eval { VOF::Context->new("test!name") };
+	like($@, qr/invalid namespace/, "bang in namespace croaks");
+};
+
+subtest 'invalid symbol characters' => sub {
+	my $ctx = VOF::Context->new("test");
+	$ctx->load("t/data/test_symbols.txt");
+
+	eval { $ctx->id_by_sym("test.order", "bad name") };
+	like($@, qr/invalid symbol/, "space in symbol croaks");
+
+	eval { $ctx->id_by_sym("test.order", "bad!sym") };
+	like($@, qr/invalid symbol/, "bang in symbol croaks");
+};
+
+# ===== Case and hyphen normalization =====
+
+subtest 'case and hyphen normalization' => sub {
+	my $ctx = VOF::Context->new("test");
+	$ctx->load("t/data/test_symbols.txt");
+
+	is($ctx->id_by_sym("test.order", "Modified-At"), 1,
+		"hyphen variant resolves");
+	is($ctx->id_by_sym("test.order", "MODIFIED_AT"), 1,
+		"uppercase variant resolves");
+	is($ctx->id_by_sym("test.order", "ID"), 0,
+		"uppercase ID resolves");
+};
+
+# ===== Alias resolution =====
+
+subtest 'alias resolution' => sub {
+	my $ctx = VOF::Context->new("test");
+	$ctx->load("t/data/test_symbols.txt");
+
+	# Alias → same ID as canonical
+	is($ctx->id_by_sym('test.$locale', "en"), 0, "alias 'en' → ID 0");
+	is($ctx->id_by_sym('test.$locale', "en_CA"), 0, "alias 'en_CA' → ID 0");
+	is($ctx->id_by_sym('test.$locale', "fr"), 1, "alias 'fr' → ID 1");
+
+	# Canonical symbol also works
+	is($ctx->id_by_sym('test.$locale', "en_US"), 0, "canonical 'en_US' → ID 0");
+	is($ctx->id_by_sym('test.$locale', "fr_CA"), 1, "canonical 'fr_CA' → ID 1");
+
+	# sym_by_id always returns canonical form
+	is($ctx->sym_by_id('test.$locale', 0), "en_US", "ID 0 → canonical 'en_US'");
+	is($ctx->sym_by_id('test.$locale', 1), "fr_CA", "ID 1 → canonical 'fr_CA'");
+
+	# Currency alias
+	is($ctx->id_by_sym('test.$currency', "cad"), 1, "alias 'cad' → ID 1");
+	is($ctx->sym_by_id('test.$currency', 1), "CAD", "ID 1 → canonical 'CAD'");
+};
+
+# ===== canon_* methods =====
+
+subtest 'canon methods' => sub {
+	my $ctx = VOF::Context->new("test");
+	$ctx->load("t/data/test_symbols.txt");
+
+	is($ctx->canon_locale("en"), "en_US", "alias → canonical");
+	is($ctx->canon_locale("en_US"), "en_US", "canonical → canonical");
+	is($ctx->canon_locale("unknown"), "unknown", "unknown → passthrough");
+
+	is($ctx->canon_currency("cad"), "CAD", "currency alias → canonical");
+	is($ctx->canon_currency("USD"), "USD", "currency canonical → canonical");
+	is($ctx->canon_currency("GBP"), "GBP", "unknown currency → passthrough");
+};
+
+# ===== is_default_locale =====
+
+subtest 'is_default_locale' => sub {
+	my $ctx = VOF::Context->new("test");
+	$ctx->load("t/data/test_symbols.txt");
+
+	ok($ctx->is_default_locale("en_US"), "canonical default locale");
+	ok($ctx->is_default_locale("en"), "alias of default locale");
+	ok($ctx->is_default_locale("en_CA"), "another alias of default locale");
+	ok(!$ctx->is_default_locale("fr_CA"), "non-default locale");
+	ok(!$ctx->is_default_locale("fr"), "alias of non-default locale");
+	ok(!$ctx->is_default_locale(""), "empty string is not default");
+
+	# Without $locale namespace
+	my $ctx2 = VOF::Context->new("nolocale");
+	ok($ctx2->is_default_locale(""), "empty string is default without \$locale");
+	ok(!$ctx2->is_default_locale("en"), "'en' is not default without \$locale");
+};
+
+# ===== Duplicate alias croaks =====
+
+subtest 'duplicate alias croaks' => sub {
+	my $ctx = VOF::Context->new("test");
+	eval { $ctx->load("t/data/test_dup_alias.txt") };
+	like($@, qr/duplicate alias/, "duplicate alias across symbols croaks");
+};
+
 done_testing;

@@ -1,0 +1,4 @@
+# Test file with duplicate alias across symbols
+test.$currency
+	USD aka:dollar
+	CAD aka:dollar
