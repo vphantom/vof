@@ -34,6 +34,23 @@ VOF - Vanilla Object Framework
 	my $json_ready = VOF::JSON::encode($price);
 	my $raw        = VOF::JSON::decode($json_structure);
 
+	# Construct a $msg for multiplexed POST/PATCH endpoints
+	my $msg_schema = $ctx->schema('$msg');
+	my $msg = vof_record($msg_schema, {
+		orders => vof_list([ $order_record ]),
+	});
+	my $wire = encode_json(VOF::JSON::encode($msg));
+
+	# Read a $msg response
+	my $raw_msg = VOF::JSON::decode(decode_json($wire));
+	my $response = as_record($ctx, $msg_schema, $raw_msg, sub {
+		my ($fields) = @_;
+		return {
+			text   => as_string($fields->{text}),
+			orders => as_list($fields->{orders}, sub { ... }),
+		};
+	});
+
 =head1 DESCRIPTION
 
 VOF is a schema-driven type system and serialization framework.  This module
@@ -60,6 +77,12 @@ conversions.
 record types, variants and enums.
 
 =back
+
+The C<$msg> record type used by VOF APIs (see the specification) is handled
+with the same primitives as any other record: construct one with C<vof_record>
+and read one with C<as_record>.  Server-side C<$msg> helpers such as
+de-duplication, query filtering and selection expansion are outside this
+client-focused implementation's scope.
 
 Constructors C<croak> on invalid input.  Readers silently return C<undef> when a
 value cannot be interpreted as the requested type.

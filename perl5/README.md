@@ -18,5 +18,5 @@ As of this version, the final encoding and decoding is left to the caller and th
 
 ## Known Limitations
 
-* Server API helpers are not implemented
+* Server-side `$msg` helpers (de-duplication, query filtering, selection expansion) are not implemented; clients construct and read `$msg` records using the existing `vof_record` / `as_record` primitives (see the POD for examples).
 * CBOR and Binary I/O are not implemented.
