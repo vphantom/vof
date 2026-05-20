@@ -26,14 +26,13 @@ These are standard (to be preferred to alternatives) but optional (implemented a
 | `datetime`/`time` | `uint` as `YYYYMMDDHHMM`                                      |
 | `timestamp`       | `int` Epoch                                                   |
 | `timespan`/`span` | `list[int,int,int]`                                           |
-| `code`            | `string` strictly `[A-Z0-9_]`                                 |
-| `language`/`lang` | `code` IETF BCP-47                                            |
-| `country`/`cntry` | `code` ISO 3166-1 alpha-2                                     |
-| `subdivision`     | `code` ISO 3166-2 alpha-1/3<br />(no country prefix)          |
-| `currency`/`curr` | `code` ISO 4217 alpha-3                                       |
-| `tax_code`        | `code` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym      |
-| `unit`            | `code` UN/CEFACT Rec. 20                                      |
-| `text`            | `strmap` of `lang,string` pairs<br />`string` for just one    |
+| `locale`          | `$locale enum` IETF BCP-47                                    |
+| `country`/`cntry` | `$country enum` ISO 3166-1 alpha-2                            |
+| `subdivision`     | `$subdivision enum` ISO 3166-2 alpha-1/3<br />(no country prefix) |
+| `currency`/`curr` | `$currency enum` ISO 4217 alpha-3                             |
+| `tax_code`        | `$tax enum` "CC[_RRR]_X"<br />ISO 3166-1, ISO 3166-2, acronym |
+| `unit`            | `$unit enum` UN/CEFACT Rec. 20                                |
+| `text`            | `$locale record` of strings<br />`string` for just one        |
 | `amount`/`price`  | String: `dec`<br />+ optional space and `curr`                |
 | `tax`/`tax_amt`   | String: `dec`<br />+ optional space and `curr`<br />+ mandatory space + `tax_code` |
 | `quantity`        | String: `dec`<br />+ optional space and `unit`                |
@@ -57,9 +56,11 @@ We use codes from UN/CEFACT Recommendation 20.  See full list at: [unece.org](ht
 
 ### Namespaces: Variant, Enum, Record
 
-A project or API has a root namespace, dot-delimited, i.e. `com.example`.
+A project or API has a root namespace, dot-delimited, i.e. `com.example`
 
-Variant, Enum and Record types need unique namespaces in singular form, for example: `com.example.order.line`
+Variant, Enum and Record types need unique namespaces in singular form, for example: `com.example.order.line`.  Namespaces only allow characters: `[$0-9A-Za-z._-]` and are upper/lower case and hyphen/underscore insensitive.
+
+Namespaces suggested by VOF are at root level and begin with a dollar sign, like `com.example.$locale`.  Applications should not use dollar signs in their own namespaces.  The namespaces are: `$msg`, `$locale`, `$country`, `$subdivision`, `$currency`, `$tax`, `$unit`.
 
 ### Series
 
@@ -85,9 +86,11 @@ Calendar duration expressed as half-months, days and seconds, each signed and ap
 
 ### Text
 
-If multiple strings are provided with the same language code, the first one wins.  Used in its bare `string` form, it is up to the applications to agree on the choice of default language.
-
-The canonical encoding is to use the bare `string` form when a single language is used and corresponds to the default language (if one is defined), to minimize space.
+* Decoders encountering multiple strings with the same locale code must pick one, preferrably the last one read.
+* Applications' `$locale` namespace should include aliases ("aka" qualifiers) for bare languages exactly once per language group, for whichever qualified locale is the application's default for the language.
+* Encoding CBOR or Binary must fail if there is no `$locale` namespace defined.  JSON should gracefully downgrade to a regular `strmap`.  Decoding CBOR or Binary without a `$locale` should gracefully skip over the value.
+* A text with a single string for the first declared locale (ID 0) when there is `$locale`, or for code `""` (empty string) when there isn't, is canonically encoded as a bare string.
+* In JSON, the `strmap` keys must be made canonical (resolving aliases) when `$locale` exists.
 
 ## JSON Encoding
 
@@ -131,7 +134,7 @@ If you need to issue multiple API requests within a few seconds, HTTP/1.1 `keepa
 * Variant/Enum/Record use `Capitalized` names.  Dependent records are namespaced in their parent, i.e. `Order.Line` used by `Order`.
 * Fields use `snake_case`.  Pluralize lists (i.e. `lines`)
 * Field names with multiple words should go from most to least precise (i.e. prefer `item_qty` over `qty_item`)
-* Suffix non-self-describing field names to clarify their type when the value might not be obvious: `_code`, `_id`, `_amt` or `_price`, `_qty`, `_tax`
+* Suffix non-self-describing field names to clarify their type when the value might not be obvious: `_id`, `_amt` or `_price`, `_qty`, `_tax`
 
 ### GET Parameters
 

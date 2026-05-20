@@ -5,6 +5,23 @@ module Datetime = Vof_lib.Datetime
 module Timestamp = Vof_lib.Timestamp
 module Enum = Vof_lib.Enum
 
+let has_sub s sub =
+  let slen = String.length s
+  and sublen = String.length sub in
+  if sublen > slen
+  then false
+  else (
+    let rec check i =
+      if i > slen - sublen
+      then false
+      else if String.sub s i sublen = sub
+      then true
+      else check (i + 1)
+    in
+    check 0
+  )
+;;
+
 (* === Enum === *)
 
 let test_enum_make_and_lookup () =
@@ -144,22 +161,6 @@ let test_pp_warn () =
       `Vof_invalid_param ("max~", "abc"), [ "max~"; "abc" ];
       `Vof_unknown_param "foo~", [ "foo~" ];
     ]
-  in
-  let has_sub s sub =
-    let slen = String.length s
-    and sublen = String.length sub in
-    if sublen > slen
-    then false
-    else (
-      let rec check i =
-        if i > slen - sublen
-        then false
-        else if String.sub s i sublen = sub
-        then true
-        else check (i + 1)
-      in
-      check 0
-    )
   in
   List.iter
     (fun (w, expected_subs) ->
@@ -456,7 +457,7 @@ let test_context_schema_redefine_update () =
           "id", [ Key ];
           "updated_at", [ Req ];
           "items", [ List_of "com.test.gizmo.item" ];
-          "label", [ Other ("indexed", None) ];
+          "label", [ Other ("indexed", None); Aka [ "lbl" ] ];
           "meta", [ Other ("format", Some "xml") ];
           (* was "json" *)
           "value", [];
@@ -467,6 +468,8 @@ let test_context_schema_redefine_update () =
   let saved2b = read_file path in
   if saved2b = saved2
   then Alcotest.fail "expected file to change after Other qualifier update";
+  if not (has_sub saved2b "aka:lbl")
+  then Alcotest.failf "expected aka:lbl in file:\n%s" saved2b;
   (* Update: promote "value" to Req and add new field "extra" *)
   let s2 =
     Vof.Context.schema ctx
@@ -475,7 +478,7 @@ let test_context_schema_redefine_update () =
           "id", [ Key ];
           "updated_at", [ Req ];
           "items", [ List_of "com.test.gizmo.item" ];
-          "label", [ Other ("indexed", None) ];
+          "label", [ Other ("indexed", None); Aka [ "tag" ] ];
           "meta", [ Other ("format", Some "json") ];
           "value", [ Req ];
           "extra", [];
@@ -489,7 +492,11 @@ let test_context_schema_redefine_update () =
   Vof.Context.save ctx;
   let saved3 = read_file path in
   if saved3 = saved2
-  then Alcotest.fail "expected file to change after schema update"
+  then Alcotest.fail "expected file to change after schema update";
+  if has_sub saved3 "aka:lbl"
+  then Alcotest.failf "expected no aka:lbl in file:\n%s" saved3;
+  if not (has_sub saved3 "aka:tag")
+  then Alcotest.failf "expected aka:tag in file:\n%s" saved3
 ;;
 
 let test_context_schema_evolution () =
@@ -1755,6 +1762,11 @@ let make_test_ctx () =
         ]
       "$msg"
   in
+  let _ =
+    Vof.Context.schema ctx
+      ~fields:[ "en_CA", [ Aka [ "en_US"; "en" ] ]; "fr_CA", [ Aka [ "fr" ] ] ]
+      "$locale"
+  in
   let order_schema =
     Context.schema ctx
       ~fields:
@@ -1786,6 +1798,7 @@ let make_test_ctx () =
           "tax_code", [];
           "measure_unit", [];
           "description", [];
+          "desc2", [];
           "ip_addr", [];
           "network", [];
           "coords", [];
@@ -1934,7 +1947,6 @@ let make_test_t
         |> StringMap.add "neg_price" (Amount ((-500, 2), Some "USD"))
         |> StringMap.add "neg_tax" (Tax ((-75, 2), "CA_QC_QST", None))
         |> StringMap.add "qty" (Quantity ((5, 0), Some "EA"))
-        |> StringMap.add "sku" (Code "ABC_123")
         |> StringMap.add "locale" (Locale "en")
         |> StringMap.add "country" (Country "US")
         |> StringMap.add "subdivision" (Subdivision "QC")
@@ -1943,8 +1955,12 @@ let make_test_t
         |> StringMap.add "measure_unit" (Unit "KGM")
         |> StringMap.add "description"
              (Text
-                (sm |> StringMap.add "en" "Test" |> StringMap.add "fr" "Essai")
+                (sm
+                |> StringMap.add "en_CA" "Test"
+                |> StringMap.add "fr_CA" "Essai"
+                )
              )
+        |> StringMap.add "desc2" (Text (sm |> StringMap.add "en_CA" "Default"))
         |> StringMap.add "ip_addr" (Ip (Bytes.of_string "\xC0\xA8\x01\x01"))
         |> StringMap.add "network"
              (Subnet (Bytes.of_string "\x0A\x00\x00\x00", 8))
@@ -2115,27 +2131,30 @@ let test_of_vof ctx
   then Alcotest.fail "neg_tax mismatch";
   let qty = require "qty" (Read.quantity (get "qty" o)) in
   if qty <> ((5, 0), Some "EA") then Alcotest.fail "qty mismatch";
-  let code = require "sku" (Read.code (get "sku" o)) in
-  if code <> "ABC_123" then Alcotest.failf "sku: expected ABC_123 got %s" code;
-  let locale = require "locale" (Read.locale (get "locale" o)) in
-  if locale <> "en" then Alcotest.failf "locale: expected en got %s" locale;
-  let country = require "country" (Read.country (get "country" o)) in
+  let locale = require "locale" (Read.locale ctx (get "locale" o)) in
+  if locale <> "en_CA" then Alcotest.failf "locale: expected en got %s" locale;
+  let country = require "country" (Read.country ctx (get "country" o)) in
   if country <> "US" then Alcotest.failf "country: expected US got %s" country;
-  let subdiv = require "subdivision" (Read.subdivision (get "subdivision" o)) in
+  let subdiv =
+    require "subdivision" (Read.subdivision ctx (get "subdivision" o))
+  in
   if subdiv <> "QC" then Alcotest.failf "subdivision: expected QC got %s" subdiv;
-  let curr = require "curr" (Read.currency (get "curr" o)) in
+  let curr = require "curr" (Read.currency ctx (get "curr" o)) in
   if curr <> "USD" then Alcotest.failf "curr: expected USD got %s" curr;
-  let tc = require "tax_code" (Read.tax_code (get "tax_code" o)) in
+  let tc = require "tax_code" (Read.tax_code ctx (get "tax_code" o)) in
   if tc <> "US_ST" then Alcotest.failf "tax_code: expected US_ST got %s" tc;
-  let u = require "measure_unit" (Read.unit_ (get "measure_unit" o)) in
+  let u = require "measure_unit" (Read.unit_ ctx (get "measure_unit" o)) in
   if u <> "KGM" then Alcotest.failf "measure_unit: expected KGM got %s" u;
   (* Text *)
-  let txt = require "description" (Read.text (get "description" o)) in
-  let en = require "description[en]" (StringMap.find_opt "en" txt) in
+  let txt = require "description" (Read.text ctx (get "description" o)) in
+  let en = require "description[en]" (StringMap.find_opt "en_CA" txt) in
   if en <> "Test" then Alcotest.failf "description[en]: expected Test got %s" en;
-  let fr = require "description[fr]" (StringMap.find_opt "fr" txt) in
+  let fr = require "description[fr]" (StringMap.find_opt "fr_CA" txt) in
   if fr <> "Essai"
   then Alcotest.failf "description[fr]: expected Essai got %s" fr;
+  let txt = require "desc2" (Read.text ctx (get "desc2" o)) in
+  let en = require "desc2[en]" (StringMap.find_opt "en_CA" txt) in
+  if en <> "Default" then Alcotest.failf "desc2[en]: expected Default got %s" en;
   (* IP *)
   let ip = require "ip_addr" (Read.ip (get "ip_addr" o)) in
   if ip <> Bytes.of_string "\xC0\xA8\x01\x01"
@@ -2809,7 +2828,6 @@ let test_pp_smoke () =
   check_nonempty "Decimal" (Decimal (1235, 1));
   check_nonempty "Date" (Date { year = 2025; month = 6; day = 15 });
   check_nonempty "Timestamp" (Timestamp 1750800000);
-  check_nonempty "Code" (Code "ABC");
   check_nonempty "Currency" (Currency "USD");
   (* pp on the full msg record *)
   check_nonempty "msg Record" v;

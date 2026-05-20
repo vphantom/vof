@@ -126,7 +126,28 @@ let write_uintmap f buf im =
   write_list_close buf len
 ;;
 
-let rec encode_val ctx buf = function
+let rec encode_val ctx buf v =
+  let record f idx sm =
+    let index_map k v acc = IntMap.add (Context.idx_id ctx idx k) v acc in
+    let im = StringMap.fold index_map sm IntMap.empty in
+    let last = ref (-1) in
+    let incr_len id _ acc =
+      let items = if id = !last + 1 then 1 else 2 in
+      last := id;
+      acc + items
+    in
+    let len = IntMap.fold incr_len im 0 in
+    write_list_open buf len;
+    last := -1;
+    let write_field id v =
+      let gap = id - !last - 1 in
+      if gap > 0 then write_gap buf gap;
+      f buf v;
+      last := id
+    in
+    IntMap.iter write_field im; write_list_close buf len
+  in
+  match v with
   | Null -> write_null buf
   | Bool b -> write_uint buf (if b then 1 else 0)
   | Int i -> write_sint buf i
@@ -150,16 +171,16 @@ let rec encode_val ctx buf = function
     write_sint buf days;
     write_sint buf secs;
     write_list_close buf 3
-  | String s
-  | Raw_bstr s
-  | Code s
-  | Locale s
-  | Country s
-  | Subdivision s
-  | Currency s
-  | Tax_code s
-  | Unit s -> write_string buf s
-  | Text tm -> write_strmap write_string buf tm
+  | String s | Raw_bstr s -> write_string buf s
+  | Locale s -> Context.write_locale (write_string buf) (write_uint buf) ctx s
+  | Country s -> Context.write_country (write_string buf) (write_uint buf) ctx s
+  | Subdivision s ->
+    Context.write_subdivision (write_string buf) (write_uint buf) ctx s
+  | Currency s ->
+    Context.write_currency (write_string buf) (write_uint buf) ctx s
+  | Tax_code s ->
+    Context.write_tax_code (write_string buf) (write_uint buf) ctx s
+  | Unit s -> Context.write_unit (write_string buf) (write_uint buf) ctx s
   | Amount (d, opt) | Quantity (d, opt) -> (
     match opt with
     | None -> write_decimal buf d
@@ -210,26 +231,17 @@ let rec encode_val ctx buf = function
     Context.lookup_id ctx schema.path s |> write_uint buf;
     List.iter (encode_val ctx buf) l;
     write_list_close buf len
+  | Text tm -> (
+    match StringMap.to_seq tm () with
+    | Nil -> write_string buf ""
+    | Cons ((k, v), rest) -> (
+      match rest () with
+      | Nil when Context.is_default_locale ctx k -> write_string buf v
+      | _ -> record write_string (Context.locale_idx ctx) tm
+    )
+  )
   | Record (schema, sm) ->
-    let idx = Context.idx_lookup ctx schema.path in
-    let index_map k v acc = IntMap.add (Context.idx_id ctx idx k) v acc in
-    let im = StringMap.fold index_map sm IntMap.empty in
-    let last = ref (-1) in
-    let incr_len id _ acc =
-      let items = if id = !last + 1 then 1 else 2 in
-      last := id;
-      acc + items
-    in
-    let len = IntMap.fold incr_len im 0 in
-    write_list_open buf len;
-    last := -1;
-    let write_field id v =
-      let gap = id - !last - 1 in
-      if gap > 0 then write_gap buf gap;
-      encode_val ctx buf v;
-      last := id
-    in
-    IntMap.iter write_field im; write_list_close buf len
+    record (encode_val ctx) (Context.idx_lookup ctx schema.path) sm
   | Series ((schema, _) :: _ as rl) ->
     let fields = series_fields ctx schema rl in
     let ids = List.map snd fields in

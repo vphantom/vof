@@ -59,7 +59,6 @@ type t =
   | Date of date
   | Datetime of datetime
   | Timespan of timespan
-  | Code of string
   | Locale of string
   | Country of string
   | Subdivision of string
@@ -118,6 +117,12 @@ module Context = struct
     root: string;
     mutable registry: index StringMap.t;
     mutable msg_idx: index option;
+    mutable locale_idx: index option;
+    mutable country_idx: index option;
+    mutable subdivision_idx: index option;
+    mutable currency_idx: index option;
+    mutable tax_code_idx: index option;
+    mutable unit_idx: index option;
     mutable fetchers: (record -> (record, string) result) StringMap.t;
   }
 
@@ -152,7 +157,20 @@ module Context = struct
       }
     in
     ctx.registry <- StringMap.add path idx ctx.registry;
-    if path = ctx.root ^ ".$msg" then ctx.msg_idx <- Some idx;
+    if path = ctx.root ^ ".$msg"
+    then ctx.msg_idx <- Some idx
+    else if path = ctx.root ^ ".$locale"
+    then ctx.locale_idx <- Some idx
+    else if path = ctx.root ^ ".$country"
+    then ctx.country_idx <- Some idx
+    else if path = ctx.root ^ ".$subdivision"
+    then ctx.subdivision_idx <- Some idx
+    else if path = ctx.root ^ ".$currency"
+    then ctx.currency_idx <- Some idx
+    else if path = ctx.root ^ ".$tax"
+    then ctx.tax_code_idx <- Some idx
+    else if path = ctx.root ^ ".$unit"
+    then ctx.unit_idx <- Some idx;
     idx
   ;;
 
@@ -169,6 +187,52 @@ module Context = struct
   ;;
 
   let idx_sym idx id = Enum.canonical_opt idx.enum id
+
+  let idx_try_canon idx_opt s =
+    match idx_opt with
+    | None -> s
+    | Some idx -> (
+      match Enum.lookup idx.enum s with
+      | None -> s
+      | Some i -> Enum.canonical idx.enum i
+    )
+  ;;
+
+  let is_default_locale ctx s =
+    match ctx.locale_idx with
+    | None -> s = ""
+    | Some idx -> Enum.lookup idx.enum s = Some 0
+  ;;
+
+  let locale_idx ctx =
+    match ctx.locale_idx with
+    | Some idx -> idx
+    | None -> die_arg "Context.locale_idx" "no $locale namespace"
+  ;;
+
+  let canon_locale ctx = idx_try_canon ctx.locale_idx
+  let canon_country ctx = idx_try_canon ctx.country_idx
+  let canon_subdivision ctx = idx_try_canon ctx.subdivision_idx
+  let canon_currency ctx = idx_try_canon ctx.currency_idx
+  let canon_tax_code ctx = idx_try_canon ctx.tax_code_idx
+  let canon_unit ctx = idx_try_canon ctx.unit_idx
+
+  let idx_try_write write_str write_int idx_opt s =
+    match idx_opt with
+    | None -> write_str s
+    | Some idx -> (
+      match Enum.lookup idx.enum s with
+      | None -> write_str s
+      | Some i -> write_int i
+    )
+  ;;
+
+  let write_locale ws wi ctx = idx_try_write ws wi ctx.locale_idx
+  let write_country ws wi ctx = idx_try_write ws wi ctx.country_idx
+  let write_subdivision ws wi ctx = idx_try_write ws wi ctx.subdivision_idx
+  let write_currency ws wi ctx = idx_try_write ws wi ctx.currency_idx
+  let write_tax_code ws wi ctx = idx_try_write ws wi ctx.tax_code_idx
+  let write_unit ws wi ctx = idx_try_write ws wi ctx.unit_idx
 
   let add_schema ctx ?fields path =
     let path = ns_str path in
@@ -309,6 +373,12 @@ module Context = struct
       root = ns_str root;
       registry = StringMap.empty;
       msg_idx = None;
+      locale_idx = None;
+      country_idx = None;
+      subdivision_idx = None;
+      currency_idx = None;
+      tax_code_idx = None;
+      unit_idx = None;
       fetchers = StringMap.empty;
     }
   ;;
@@ -564,7 +634,6 @@ module Read = struct
     | Raw_tstr s
     | Raw_bstr s
     | String s
-    | Code s
     | Locale s
     | Country s
     | Subdivision s
@@ -578,13 +647,26 @@ module Read = struct
     | _ -> None
   ;;
 
-  let code = string
-  let locale = string
-  let country = string
-  let subdivision = string
-  let currency = string
-  let tax_code = string
-  let unit_ = string
+  let code (idxo : Context.index option) v =
+    match v, idxo with
+    | _, None -> string v
+    | Raw_bint n, Some idx
+    | Raw_tint n, Some idx
+    | Raw_int n, Some idx
+    | Int n, Some idx
+    | Uint n, Some idx -> Enum.canonical_opt idx.enum n
+    | _, Some idx ->
+      let| s = string v in
+      let| id = Enum.lookup idx.enum s in
+      Some (Enum.canonical idx.enum id)
+  ;;
+
+  let locale (ctx : Context.t) = code ctx.locale_idx
+  let country (ctx : Context.t) = code ctx.country_idx
+  let subdivision (ctx : Context.t) = code ctx.subdivision_idx
+  let currency (ctx : Context.t) = code ctx.currency_idx
+  let tax_code (ctx : Context.t) = code ctx.tax_code_idx
+  let unit_ (ctx : Context.t) = code ctx.unit_idx
 
   let data = function
     | Raw_tstr s -> (
@@ -808,22 +890,6 @@ module Read = struct
     | _ -> None
   ;;
 
-  let text = function
-    | Text sm -> Some sm
-    | Raw_blist l | Raw_tlist l | Raw_list l | List l ->
-      let rec each sm = function
-        | [] -> Some sm
-        | k :: v :: rest -> (
-          match string k, string v with
-          | Some ks, Some vs -> each (StringMap.add ks vs sm) rest
-          | _ -> None
-        )
-        | _ -> None
-      in
-      each StringMap.empty l
-    | _ -> None
-  ;;
-
   let uintmap f = function
     | Uintmap sm ->
       let each k v acc =
@@ -923,11 +989,17 @@ module Read = struct
   let record ctx schema f = function
     | Record (_, sm) -> f sm
     | Raw_tlist l ->
+      let idx = Context.idx_lookup ctx schema.path in
+      let canon ks =
+        match Enum.lookup idx.enum ks with
+        | Some id -> Enum.canonical idx.enum id
+        | None -> ks
+      in
       let rec pairs sm = function
         | [] -> f sm
         | k :: v :: rest ->
           let| ks = string k in
-          pairs (StringMap.add ks v sm) rest
+          pairs (StringMap.add (canon ks) v sm) rest
         | _ -> None
       in
       pairs StringMap.empty l
@@ -1004,6 +1076,31 @@ module Read = struct
     Some (List.filter_map filter existing @ List.rev !additions)
   ;;
 
+  let text (ctx : Context.t) v =
+    match v, ctx.locale_idx with
+    | Text sm, _ -> Some sm
+    | Raw_bstr s, Some idx | Raw_tstr s, Some idx | String s, Some idx ->
+      Some (StringMap.singleton (Enum.canonical idx.enum 0) s)
+    | Raw_bstr s, None | Raw_tstr s, None | String s, None ->
+      Some (StringMap.singleton "" s)
+    | Raw_tlist l, None ->
+      let rec each sm = function
+        | [] -> Some sm
+        | k :: v :: rest -> (
+          match string k, string v with
+          | Some ks, Some vs -> each (StringMap.add ks vs sm) rest
+          | _ -> None
+        )
+        | _ -> None
+      in
+      each StringMap.empty l
+    | _, None -> None
+    | _, Some _ ->
+      let schema = { path = ctx.root ^ ".$locale"; keys = []; reqs = [] } in
+      let filter sm = Some (StringMap.filter_map (fun _ v -> string v) sm) in
+      record ctx schema filter v
+  ;;
+
   let series ctx schema f = function
     | Raw_blist [] | Raw_tlist [] | Raw_list [] -> Some []
     | Series l -> (
@@ -1071,13 +1168,7 @@ let rec pp = function
   | Int n | Uint n | Timestamp n -> Int.to_string n
   | Float f -> Float.to_string f
   | String s -> Printf.sprintf "%S" s
-  | Code s
-  | Locale s
-  | Country s
-  | Subdivision s
-  | Currency s
-  | Tax_code s
-  | Unit s -> s
+  | Locale s | Country s | Subdivision s | Currency s | Tax_code s | Unit s -> s
   | Decimal d -> Decimal.to_string d
   | Ratio r -> Ratio.to_string r
   | Percent (v, d) -> Decimal.to_string (v * 100, d) ^ "%"

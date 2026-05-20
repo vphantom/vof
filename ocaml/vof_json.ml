@@ -47,7 +47,7 @@ let of_datetime dt =
     )
 ;;
 
-let rec of_vof ctx = function
+let rec of_vof (ctx : Context.t) = function
   | Null -> `Null
   | Bool b -> `Bool b
   | Int i | Uint i | Timestamp i | Raw_tint i ->
@@ -64,16 +64,23 @@ let rec of_vof ctx = function
   | Datetime dt -> of_datetime dt
   | Timespan { hmonths; days; secs } ->
     `List [ `Int hmonths; `Int days; `Int secs ]
-  | Code s
-  | Locale s
-  | Country s
-  | Subdivision s
-  | Currency s
-  | Tax_code s
-  | Unit s -> `String s
-  | Text sm ->
-    `Assoc
-      (StringMap.fold (fun k v acc -> (k, `String v) :: acc) sm [] |> List.rev)
+  | Locale s -> `String (Context.canon_locale ctx s)
+  | Country s -> `String (Context.canon_country ctx s)
+  | Subdivision s -> `String (Context.canon_subdivision ctx s)
+  | Currency s -> `String (Context.canon_currency ctx s)
+  | Tax_code s -> `String (Context.canon_tax_code ctx s)
+  | Unit s -> `String (Context.canon_unit ctx s)
+  | Text sm -> (
+    match StringMap.to_seq sm () with
+    | Nil -> `String ""
+    | Cons ((k, v), rest) -> (
+      match rest () with
+      | Nil when Context.is_default_locale ctx k -> `String v
+      | _ ->
+        let each k v acc = (Context.canon_locale ctx k, `String v) :: acc in
+        `Assoc (StringMap.fold each sm [] |> List.rev)
+    )
+  )
   | Amount (d, None) | Quantity (d, None) -> `String (Decimal.to_string d)
   | Amount (d, Some s) | Quantity (d, Some s) ->
     `String (Decimal.to_string d ^ " " ^ s)

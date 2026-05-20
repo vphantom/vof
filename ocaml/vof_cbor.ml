@@ -226,7 +226,16 @@ let decode ?(pos = 0) ?len src =
   try Some (item (), !p) with Exit -> None
 ;;
 
-let rec encode_val ctx buf = function
+let rec encode_val ctx buf v =
+  let record f idx sm =
+    let index_map k v acc = IntMap.add (Context.idx_id ctx idx k) v acc in
+    let im = StringMap.fold index_map sm IntMap.empty in
+    let len = IntMap.cardinal im in
+    write_map_open buf len;
+    IntMap.iter (fun id v -> write_uint buf id; f buf v) im;
+    write_map_close buf len
+  in
+  match v with
   | Null -> write_null buf
   | Bool b -> write_bool buf b
   | Int i | Raw_bint i -> write_int buf i
@@ -255,14 +264,13 @@ let rec encode_val ctx buf = function
     write_int buf hmonths;
     write_int buf days;
     write_int buf secs
-  | Code s
-  | Locale s
-  | Country s
-  | Subdivision s
-  | Currency s
-  | Tax_code s
-  | Unit s -> write_text buf s
-  | Text tm -> write_strmap write_text buf tm
+  | Locale s -> Context.write_locale (write_text buf) (write_uint buf) ctx s
+  | Country s -> Context.write_country (write_text buf) (write_uint buf) ctx s
+  | Subdivision s ->
+    Context.write_subdivision (write_text buf) (write_uint buf) ctx s
+  | Currency s -> Context.write_currency (write_text buf) (write_uint buf) ctx s
+  | Tax_code s -> Context.write_tax_code (write_text buf) (write_uint buf) ctx s
+  | Unit s -> Context.write_unit (write_text buf) (write_uint buf) ctx s
   | Amount (d, opt) -> (
     let dec = Decimal.to_n d in
     match opt with
@@ -304,14 +312,17 @@ let rec encode_val ctx buf = function
     write_array_head buf (1 + List.length l);
     Context.lookup_id ctx schema.path s |> write_int buf;
     List.iter (encode_val ctx buf) l
+  | Text tm -> (
+    match StringMap.to_seq tm () with
+    | Nil -> write_text buf ""
+    | Cons ((k, v), rest) -> (
+      match rest () with
+      | Nil when Context.is_default_locale ctx k -> write_text buf v
+      | _ -> record write_text (Context.locale_idx ctx) tm
+    )
+  )
   | Record (schema, sm) ->
-    let idx = Context.idx_lookup ctx schema.path in
-    let index_map k v acc = IntMap.add (Context.idx_id ctx idx k) v acc in
-    let im = StringMap.fold index_map sm IntMap.empty in
-    let len = IntMap.cardinal im in
-    write_map_open buf len;
-    IntMap.iter (fun id v -> write_int buf id; encode_val ctx buf v) im;
-    write_map_close buf len
+    record (encode_val ctx) (Context.idx_lookup ctx schema.path) sm
   | Series ((schema, _) :: _ as rl) ->
     let fields = series_fields ctx schema rl in
     let ids = List.map snd fields in

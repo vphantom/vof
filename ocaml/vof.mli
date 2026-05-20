@@ -60,7 +60,6 @@ type t =
   | Date of date
   | Datetime of datetime
   | Timespan of timespan
-  | Code of string
   | Locale of string
   | Country of string
   | Subdivision of string
@@ -154,6 +153,43 @@ module Context : sig
   (** [idx_sym idx id] returns the symbol name for integer [id], or [None] if
       out of range. *)
   val idx_sym : index -> int -> string option
+
+  (** [locale_idx ctx] returns the index for the [$locale] namespace, raises if
+      not found. *)
+  val locale_idx : t -> index
+
+  (** [is_default_locale ctx sym] returns whether [sym] is index 0 if there is a
+      [$locale] namespace or whether [sym] is [""] if not. *)
+  val is_default_locale : t -> string -> bool
+
+  (** {2 Symbol Normalization}
+
+      [canon_xxx ctx sym] normalizes a symbol [sym] to a canonical name, if
+      there is a [$xxx] namespace in your root and [sym] is a symbol or alias,
+      or returns [sym] otherwise. *)
+
+  val canon_locale : t -> string -> string
+  val canon_country : t -> string -> string
+  val canon_subdivision : t -> string -> string
+  val canon_currency : t -> string -> string
+  val canon_tax_code : t -> string -> string
+  val canon_unit : t -> string -> string
+
+  (** {2 Symbol Writers}
+
+      [write_xxx write_str write_int ctx sym] calls your [write_int] if there is
+      a [$xxx] namespace in your root which contains [sym] (as a symbol or
+      alias), calls your [write_str] with [sym] otherwise. *)
+
+  val write_locale : (string -> unit) -> (int -> unit) -> t -> string -> unit
+  val write_country : (string -> unit) -> (int -> unit) -> t -> string -> unit
+
+  val write_subdivision :
+    (string -> unit) -> (int -> unit) -> t -> string -> unit
+
+  val write_currency : (string -> unit) -> (int -> unit) -> t -> string -> unit
+  val write_tax_code : (string -> unit) -> (int -> unit) -> t -> string -> unit
+  val write_unit : (string -> unit) -> (int -> unit) -> t -> string -> unit
 end
 
 (** {1 Warnings} *)
@@ -241,13 +277,12 @@ module Read : sig
   val bool : t -> bool option
   val float : t -> float option
   val string : t -> string option
-  val code : t -> string option
-  val locale : t -> string option
-  val country : t -> string option
-  val subdivision : t -> string option
-  val currency : t -> string option
-  val tax_code : t -> string option
-  val unit_ : t -> string option
+  val locale : Context.t -> t -> string option
+  val country : Context.t -> t -> string option
+  val subdivision : Context.t -> t -> string option
+  val currency : Context.t -> t -> string option
+  val tax_code : Context.t -> t -> string option
+  val unit_ : Context.t -> t -> string option
   val data : t -> bytes option
   val decimal : t -> decimal option
   val ratio : t -> ratio option
@@ -263,7 +298,7 @@ module Read : sig
   val ip : t -> bytes option
   val subnet : t -> (bytes * int) option
   val strmap : (t -> 'a option) -> t -> 'a StringMap.t option
-  val text : t -> string StringMap.t option
+  val text : Context.t -> t -> string StringMap.t option
   val uintmap : (t -> 'a option) -> t -> 'a IntMap.t option
   val list : (t -> 'a option) -> t -> 'a list option
   val ndarray : (t -> 'a option) -> t -> (int list * 'a array) option

@@ -204,9 +204,11 @@ Calendar duration expressed as half-months, days and seconds, each signed and ap
 
 ### Text
 
-If multiple strings are provided with the same locale code, the first one wins.  Used in its bare `string` form, it is up to the applications to agree on the choice of default locale.  `$locale` should include aliases for bare languages exactly once per language group, for whichever qualified locale is the application's default for the language.
-
-The canonical encoding is to use the bare `string` form when a single locale is used and corresponds to the default locale (if one is defined), to minimize space.
+* Decoders encountering multiple strings with the same locale code must pick one, preferrably the last one read.
+* Applications' `$locale` namespace should include aliases ("aka" qualifiers) for bare languages exactly once per language group, for whichever qualified locale is the application's default for the language.
+* Encoding CBOR or Binary must fail if there is no `$locale` namespace defined.  JSON should gracefully downgrade to a regular `strmap`.  Decoding CBOR or Binary without a `$locale` should gracefully skip over the value.
+* A text with a single string for the first declared locale (ID 0) when there is `$locale`, or for code `""` (empty string) when there isn't, is canonically encoded as a bare string.
+* In JSON, the `strmap` keys must be made canonical (resolving aliases) when `$locale` exists.
 
 ## JSON Encoding
 
