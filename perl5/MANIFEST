@@ -13,3 +13,5 @@ t/05_json_decode.t
 t/06_json_encode.t
 t/07_roundtrip.t
 t/data/test_symbols.txt
+t/data/test_dup_alias.txt
+t/data/test_foreign_ns.txt
