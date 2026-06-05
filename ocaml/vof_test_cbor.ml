@@ -9,7 +9,9 @@
 
    Due to the nature of VOF, the 'roundtrip' suggestion is ignored here. The
    main reason being our codec immediately decodes maps as lists, since the
-   distinction wouldn't be useful in [Vof.t]. *)
+   distinction wouldn't be useful in [Vof.t]. The encoding side of things is
+   also omitted here, but is covered by the combination of this test and the
+   main test suite's round-trip tests. *)
 
 (* -- Hex utilities -- *)
 
