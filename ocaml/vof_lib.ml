@@ -44,8 +44,9 @@ module Enum = struct
   let add e = function
     | [] -> e
     | canon :: aliases as all ->
+        let all = List.map sym_str all in
       let check a =
-        if StringMap.mem (sym_str a) e.idx
+        if StringMap.mem (a) e.idx
         then die_arg "Enum.add" "duplicate %s" a
       in
       List.iter check all;
@@ -53,7 +54,7 @@ module Enum = struct
       {
         canon = Array.append e.canon [| canon |];
         idx =
-          List.fold_left (fun m a -> StringMap.add (sym_str a) id m) e.idx all;
+          List.fold_left (fun m a -> StringMap.add (a) id m) e.idx all;
         aliases = Array.append e.aliases [| aliases |];
       }
   ;;
