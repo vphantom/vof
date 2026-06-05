@@ -377,5 +377,8 @@ let decode ?(pos = 0) ?len src =
     | 254 -> Raw_gap (read_uint ())
     | _ -> raise_notrace Exit
   in
-  try Some (item (), !p) with Exit -> None
+  try
+    let v = item () in
+    Some (v, !p)
+  with Exit -> None
 ;;

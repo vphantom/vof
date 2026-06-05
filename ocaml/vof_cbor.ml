@@ -223,7 +223,10 @@ let decode ?(pos = 0) ?len src =
     )
     | _ -> raise_notrace Exit
   in
-  try Some (item (), !p) with Exit -> None
+  try
+    let v = item () in
+    Some (v, !p)
+  with Exit -> None
 ;;
 
 let rec encode_val ctx buf v =

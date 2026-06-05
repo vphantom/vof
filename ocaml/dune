@@ -8,7 +8,7 @@
 (library
  (name vof)
  (wrapped false)
- (modules :standard \ vof_test vof_lib)
+ (modules :standard \ vof_test vof_test_cbor vof_vectors vof_lib)
  (private_modules vof_enc)
  (libraries unix base64 ipaddr vof_lib)
  (instrumentation
@@ -18,6 +18,16 @@
  (name vof_test)
  (modules vof_test)
  (libraries vof_lib vof alcotest qcheck qcheck-alcotest))
+
+(executable
+ (name vof_test_cbor)
+ (modules vof_test_cbor)
+ (libraries vof_lib vof yojson alcotest))
+
+(executable
+ (name vof_vectors)
+ (modules vof_vectors)
+ (libraries vof_lib vof yojson))
 
 (env
  (default

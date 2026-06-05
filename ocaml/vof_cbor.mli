@@ -12,7 +12,12 @@
     such even if it is not strictly necessary. *)
 
 (** [decode ?pos ?len s] decodes a VOF raw value from the CBOR-encoded string
-    [s]. *)
+    [s].
+
+    The returned value uses a small subset of the variant: [Null], [Bool],
+    [Float], [Raw_bint], [Raw_bstr], [Raw_blist]. The integer portion is the
+    offset position of the next byte, so it is equal to [pos] in the [None]
+    case. *)
 val decode : ?pos:int -> ?len:int -> string -> (Vof.t * int) option
 
 (** [encode_buf ctx ?magic ?buf v] encodes a VOF value [v] with context [ctx]

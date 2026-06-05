@@ -7,7 +7,12 @@
     Little Endian byte order is used throughout. *)
 
 (** [decode ?pos ?len s] decodes a VOF raw value from the binary-encoded string
-    [s]. Returns the decoded input and the number of bytes consumed. *)
+    [s]. Returns the decoded input and the number of bytes consumed.
+
+    The returned value uses a small subset of the variant: [Null], [Bool],
+    [Float], [Raw_int], [Raw_bstr], [Raw_list], [Raw_gap], [Raw_tag]. The
+    integer portion is the offset position of the next byte, so it is equal to
+    [pos] in the [None] case. *)
 val decode : ?pos:int -> ?len:int -> string -> (Vof.t * int) option
 
 (** [encode_buf ctx ?buf v] encodes a VOF value [v] with context [ctx] into a

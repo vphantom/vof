@@ -10,7 +10,7 @@ clean:
 
 test:
 	@rm -rf _coverage
-	@dune runtest --profile=coverage --instrument-with bisect_ppx --force
+	@dune runtest --profile=coverage --instrument-with bisect_ppx --force --no-buffer
 	@bisect-ppx-report html
 	@bisect-ppx-report summary
 	@bisect-ppx-report coveralls _coverage/coverage.json
