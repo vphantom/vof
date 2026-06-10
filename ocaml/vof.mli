@@ -194,20 +194,9 @@ end
 
 (** {1 Warnings} *)
 
-type warning = [
-  | `Vof_bad_field of string * string
-  | `Vof_fetch_failed of string * string
-  | `Vof_invalid_param of string * string
-  | `Vof_unknown_param of string
-] [@@ocamlformat "disable"]
-
 (** Your list of warnings. Note that this module adds warnings to the head of
     this list, so it is chronologically reversed. *)
-type warnings = warning list ref
-
-(** [pp_warn w] returns a string representation of a warning, in simple English.
-*)
-val pp_warn : warning -> string
+type warnings = string list ref
 
 (** {1 Decoding} *)
 

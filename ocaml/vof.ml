@@ -540,27 +540,15 @@ module KeyMap = Map.Make (struct
   let compare = Stdlib.compare
 end)
 
-type warning = [
-  | `Vof_bad_field of string * string
-  | `Vof_fetch_failed of string * string
-  | `Vof_invalid_param of string * string
-  | `Vof_unknown_param of string
-] [@@ocamlformat "disable"]
+type warnings = string list ref
 
-type warnings = warning list ref
-
-let add_warn wl_opt w =
-  match wl_opt with
-  | Some r -> r := w :: !r
-  | None -> ()
-;;
-
-let pp_warn = function
-  | `Vof_bad_field (p, f) -> Printf.sprintf "bad record field: %s.%s" p f
-  | `Vof_fetch_failed (path, reason) ->
-    Printf.sprintf "fetch failed for %s: %s" path reason
-  | `Vof_invalid_param (f, v) -> Printf.sprintf "invalid parameter %s='%s'" f v
-  | `Vof_unknown_param s -> Printf.sprintf "unknown parameter: %s" s
+let add_warn wl_opt fmt =
+  let maybe s =
+    match wl_opt with
+    | Some r -> r := s :: !r
+    | None -> ()
+  in
+  Printf.ksprintf maybe ("Vof: " ^^ fmt)
 ;;
 
 type format = Gzip | Zstd | Json | Cbor | Binary
@@ -972,7 +960,7 @@ module Read = struct
     in
     try Some (StringMap.fold wrap sm acc)
     with Vof_bad_field ->
-      add_warn warn (`Vof_bad_field (schema.path, !last_key));
+      add_warn warn "bad record field: %s.%s" schema.path !last_key;
       None
   ;;
 
@@ -1049,7 +1037,7 @@ module Read = struct
     let additions = ref [] in
     let classify item =
       match parse_sm item with
-      | None -> add_warn warn (`Vof_bad_field (schema.path, "[]"))
+      | None -> add_warn warn "bad record field: %s.%s" schema.path "[]"
       | Some sm -> (
         match key_read sm with
         | None ->
@@ -1517,12 +1505,12 @@ let make_query ?warn params =
   let filters = ref [] in
   let process (key, value) =
     match key with
-    | "" -> add_warn warn (`Vof_unknown_param "empty string")
+    | "" -> add_warn warn "unknown parameter: empty string"
     | "select~" -> (
       match parse_selection_str value with
       | Some s -> sel := s
       | None ->
-        add_warn warn (`Vof_invalid_param (key, value));
+        add_warn warn "invalid parameter %s=%s" key value;
         sel := default_selection
     )
     | "prune~" ->
@@ -1532,19 +1520,19 @@ let make_query ?warn params =
     | "max~" -> (
       match int_of_string_opt value with
       | Some n when n > 0 -> max_val := n
-      | _ -> add_warn warn (`Vof_invalid_param (key, value))
+      | _ -> add_warn warn "invalid parameter %s=%s" key value
     )
     | "page~" -> (
       match int_of_string_opt value with
       | Some n when n > 0 -> page_val := n
-      | _ -> add_warn warn (`Vof_invalid_param (key, value))
+      | _ -> add_warn warn "invalid parameter %s=%s" key value
     )
     | k when k.[String.length k - 1] = '~' ->
-      add_warn warn (`Vof_unknown_param key)
+      add_warn warn "unknown parameter: %s" key
     | _ -> (
       match parse_filter key value with
       | Some f -> filters := f :: !filters
-      | None -> add_warn warn (`Vof_invalid_param (key, value))
+      | None -> add_warn warn "invalid parameter %s=%s" key value
     )
   in
   List.iter process params;
@@ -1626,7 +1614,7 @@ let build_msg (ctx : Context.t) ?warn q ?msg v =
         match fetcher r with
         | Ok full -> Record (filter_record sub full)
         | Error e ->
-          add_warn warn (`Vof_fetch_failed (schema.path, e));
+          add_warn warn "fetch failed for %s: %s" schema.path e;
           Record r
       )
     )
@@ -1646,7 +1634,7 @@ let build_msg (ctx : Context.t) ?warn q ?msg v =
           add_to_msg filtered;
           Record (make_ref filtered)
         | Error e ->
-          add_warn warn (`Vof_fetch_failed (schema.path, e));
+          add_warn warn "fetch failed for %s: %s" schema.path e;
           Record r
       )
     )

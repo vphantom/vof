@@ -25,17 +25,6 @@ Development dependencies add:
 
 In light of the new `array` &gt; `Hashtbl.Make` &gt; `Map.Make` performance findings, review all uses of `StringMap` and `IntMap`.
 
-Drop the warning polymorphic variant:
-
-```ocaml
-(* MLI *)
-type warn_code = Ignored_field | Default_used | ...
-type warning = warn_code * string
-type warnings = warning list ref
-
-val make_query : ?warn:warnings -> params -> query
-```
-
 ## Installation
 
 This package is not published on OPAM.  Two common approaches are:

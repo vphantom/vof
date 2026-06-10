@@ -150,32 +150,6 @@ let test_detect_format () =
     cases
 ;;
 
-(* === Warnings === *)
-
-let test_pp_warn () =
-  let open Vof in
-  let cases =
-    [
-      `Vof_bad_field ("order", "name"), [ "order"; "name" ];
-      `Vof_fetch_failed ("order", "not found"), [ "order"; "not found" ];
-      `Vof_invalid_param ("max~", "abc"), [ "max~"; "abc" ];
-      `Vof_unknown_param "foo~", [ "foo~" ];
-    ]
-  in
-  List.iter
-    (fun (w, expected_subs) ->
-      let s = pp_warn w in
-      if String.length s = 0 then Alcotest.fail "pp_warn returned empty string";
-      List.iter
-        (fun sub ->
-          if not (has_sub s sub)
-          then Alcotest.failf "pp_warn: expected %S in %S" sub s
-        )
-        expected_subs
-    )
-    cases
-;;
-
 (* === Context === *)
 
 let test_context_make () =
@@ -4156,11 +4130,7 @@ let test_make_query_parse_edges () =
 let () =
   Alcotest.run "vof"
     [
-      ( "Core",
-        [
-          Alcotest.test_case "detect_format" `Quick test_detect_format;
-          Alcotest.test_case "pp_warn" `Quick test_pp_warn;
-        ] );
+      "Core", [ Alcotest.test_case "detect_format" `Quick test_detect_format ];
       ( "Context",
         [
           Alcotest.test_case "make" `Quick test_context_make;
