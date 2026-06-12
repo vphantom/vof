@@ -25,6 +25,10 @@ Development dependencies add:
 
 In light of the new `array` &gt; `Hashtbl.Make` &gt; `Map.Make` performance findings, review all uses of `StringMap` and `IntMap`.
 
+* Now: convert `registry`, `fetchers`, `fields`, `lists` from `StringMap.t` to `StringHashtbl.t`
+* Next: convert record `t StringMap.t` to a sorted flat array or a `StringHashtbl.t` behind a `RecordMap.t` abstraction (to provide `equal`, `filter_copy`, `fold`, etc.).  The sorted array of `string * t` might outperform Hashtbl for small records (under 30 fields).  Building requires sorting but lookup and iteration are fast.  If records are built from a single source (and not gradually inserted into), array might be best.
+* Stuff in `t` besides `record`, all selection, query, msg structures, StringSet uses, per-field `other` maps, probably best to stay as-is.
+
 ## Installation
 
 This package is not published on OPAM.  Two common approaches are:
